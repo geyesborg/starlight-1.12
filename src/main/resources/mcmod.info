@@ -1,0 +1,14 @@
+[
+  {
+    "modid": "starlight",
+    "name": "Starlight (1.12.2 port)",
+    "description": "Starlight lighting engine (Spottedleaf, from Moonrise) ported to Minecraft 1.12.2 on Cleanroom.",
+    "version": "@{VERSION}",
+    "mcversion": "1.12.2",
+    "url": "",
+    "authorList": ["geyesborg"],
+    "credits": "Spottedleaf (Starlight/Moonrise, GPL-3.0); Red Studio (Alfheim, MIT) for 1.12 hook research",
+    "requiredMods": ["cleanroom"],
+    "dependencies": ["cleanroom"]
+  }
+]

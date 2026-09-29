@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "com.github.starlight.mixin",
+  "refmap": "starlight.refmap.json",
+  "compatibilityLevel": "JAVA_17",
+  "target": "@env(DEFAULT)",
+  "mixins": [
+    "WorldMixin"
+  ],
+  "client": [],
+  "server": [],
+  "minVersion": "0.8.7"
+}

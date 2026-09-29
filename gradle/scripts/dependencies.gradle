@@ -1,0 +1,40 @@
+apply from: 'gradle/scripts/helpers.gradle'
+
+repositories {
+    mavenCentral()
+    maven {
+        name = 'CurseMaven'
+        url = 'https://curse.cleanroommc.com'
+    }
+    maven {
+        name = 'Modrinth'
+        url = 'https://api.modrinth.com/maven'
+    }
+    mavenLocal() // Must be last for caching to work
+}
+
+dependencies {
+    compileOnly 'com.cleanroommc:cleanmix:0.7.2'
+
+    // The compile classpath otherwise gets an old ASM (5.x-era) transitively via the MC launch
+    // classpath; the coremod transformer uses Opcodes.ASM9. Runtime ASM is 9.10.1 from userdev.
+    compileOnly 'org.ow2.asm:asm:9.10.1'
+    compileOnly 'org.ow2.asm:asm-tree:9.10.1'
+
+    // LWJGL 3 OpenGL (provided by Cleanroom at runtime)
+    compileOnly platform('org.lwjgl:lwjgl-bom:3.4.3')
+    compileOnly 'org.lwjgl:lwjgl-opengl'
+
+    // JOML for matrix math: Cleanroom ships org.joml:joml:1.10.9 as a library (and loads it
+    // before mod jars), so it is not embedded
+    compileOnly 'org.joml:joml:1.10.9'
+
+    // Cleanroom's window is SDL via LWJGLY — org.lwjgl.opengl.Display and
+    // org.lwjgl.input.Keyboard are provided at runtime. compileOnly for the
+    // API surface used by CoreSplashRenderer / MixinFMLClientHandler.
+    compileOnly 'com.cleanroommc:lwjgly:1.0.0'
+
+    if (propertyBool('enable_lwjglx')) {
+        compileOnly "com.cleanroommc:lwjglx:1.0.0"
+    }
+}

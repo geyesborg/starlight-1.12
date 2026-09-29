@@ -1,0 +1,371 @@
+plugins {
+    id 'java'
+    id 'java-library'
+    id 'maven-publish'
+    id 'com.cleanroommc.cleanroomgradle'
+    id 'com.cleanroommc.conventions'
+}
+
+import com.cleanroommc.gradle.api.task.mc.RunMinecraft
+
+apply from: 'gradle/scripts/helpers.gradle'
+
+// Early Assertions
+assertProperty 'mod_version'
+assertProperty 'root_package'
+assertProperty 'mod_id'
+assertProperty 'mod_name'
+
+assertSubProperties 'use_access_transformer', 'access_transformer_locations'
+assertSubProperties 'is_coremod', 'coremod_includes_mod', 'coremod_plugin_class_name'
+
+setDefaultProperty 'generate_sources_jar', true, false
+setDefaultProperty 'generate_javadocs_jar', true, false
+setDefaultProperty 'minecraft_username', true, 'Developer'
+setDefaultProperty 'extra_jvm_args', false, ''
+setDefaultProperty 'enable_cleanmix_hooks', false, true
+setDefaultProperty 'enable_foundation_debug', false, false
+
+ext {
+    access_transformer_locations = "${mod_id}_at.cfg"
+    mixin_config_list = "${mod_id}.mixin.json"
+}
+
+// Under Cleanroom Conventions, project.version comes from git-tag versioning
+// (applied via conventions.base); it forbids a declared version.
+if (!pluginManager.hasPlugin('com.cleanroommc.versioning')) {
+    version = propertyString('mod_version')
+}
+group = propertyString('root_package')
+
+base {
+    archivesName = propertyString('mod_id')
+}
+
+plugins.withId('com.cleanroommc.conventions') {
+    tokenEnvoy {
+        set 'VERSION', project.version
+    }
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(25)
+    }
+    sourceCompatibility = JavaVersion.VERSION_25
+    targetCompatibility = JavaVersion.VERSION_25
+    if (propertyBool('generate_sources_jar')) {
+        withSourcesJar()
+    }
+    if (propertyBool('generate_javadocs_jar')) {
+        withJavadocJar()
+    }
+}
+
+configurations {
+    embed
+    contain
+    implementation.extendsFrom(embed)
+    implementation.extendsFrom(contain)
+    modCompileOnly
+    compileOnly.extendsFrom(modCompileOnly)
+    modRuntimeOnly
+    runtimeOnly.extendsFrom(modRuntimeOnly)
+}
+
+dependencies {
+    implementation cleanroom.userdev('0.6.10') {
+        if (propertyBool('use_access_transformer')) {
+            accessTransformers.from(layout.projectDirectory.file("src/main/resources/$access_transformer_locations"))
+        }
+    }
+    // Mixin annotation processor (CleanMix's): writes the refmap the production jar needs
+    annotationProcessor 'com.cleanroommc:cleanmix:0.7.2'
+    if (enable_junit_testing.toBoolean()) {
+        testImplementation 'org.junit.jupiter:junit-jupiter:6.0.3'
+        testImplementation 'org.assertj:assertj-core:3.27.6'
+        testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+    }
+}
+
+compileTestJava {
+    sourceCompatibility = targetCompatibility = JavaVersion.VERSION_25
+    classpath += compileJava.classpath
+}
+
+test {
+    useJUnitPlatform()
+    classpath += compileJava.classpath
+    javaLauncher.set(javaToolchains.launcherFor {
+        languageVersion = JavaLanguageVersion.of(25)
+    })
+    if (show_testing_output.toBoolean()) {
+        testLogging {
+            showStandardStreams = true
+        }
+    }
+}
+
+tasks.withType(RunMinecraft).configureEach {
+    if (name == 'runClient') {
+        workingDir(layout.projectDirectory.dir('run/cleanroom-client'))
+        username.set(minecraft_username)
+        // LWJGL needs explicit native access on JDK 25+, and exporting jdk.internal.misc lets it use its
+        // modern memory backend instead of the terminally deprecated sun.misc.Unsafe one.
+        jvmArgs '--enable-native-access=ALL-UNNAMED',
+                '--add-exports', 'java.base/jdk.internal.misc=ALL-UNNAMED'
+        if (propertyBool('enable_foundation_debug')) {
+            jvmArgs '-Dfoundation.dump=true', '-Dfoundation.verbose=true'
+        }
+        // The coremod plugin is loaded from the dev jar's FMLCorePlugin manifest attribute
+        // (jar is copied into run/cleanroom-client/mods). Passing -Dfml.coreMods.load would
+        // poison Foundation's invalid-class cache before jar discovery adds it to the loader.
+        def extraArgs = propertyString('extra_jvm_args')
+        if (extraArgs != null && !extraArgs.trim().isEmpty()) {
+            jvmArgs(*extraArgs.trim().split('\\s+'))
+        }
+        //   -Pstarlight_autojoin=<save folder>   load that world once the main menu appears
+        def autojoin = findProperty('starlight_autojoin')
+        if (autojoin != null && autojoin.toString() != 'false' && !autojoin.toString().isEmpty()) {
+            String worldName = autojoin.toString() == 'true' ? 'New World' : autojoin.toString()
+            jvmArgs "-Dstarlight.autoJoin=${worldName}"
+        }
+    }
+}
+
+apply from: 'gradle/scripts/dependencies.gradle'
+
+// conventions.settings injects an exclusive-content "Cleanroom" repo claiming group
+// com.cleanroommc ahead of CleanroomGradle's local-repo claims, which makes the
+// locally-published userdev (cg.repos.enableLocal) unreachable. Swap it for a plain
+// repo of the same URL; CleanroomGradle's own exclusive mavenLocal claims still serve
+// the local artifacts.
+// Workaround (same as gl46core): the Conventions settings plugin declares exclusive content on the
+// Cleanroom maven repo, which injects excludeSpecs for com.cleanroommc:* onto
+// every other repository and blocks resolution of the locally-published
+// cleanroom-userdev. Strip those injected exclude specs from the repos that
+// must serve local artifacts.
+def stripExcludes = { repo ->
+    def d = null
+    def c = repo.getClass()
+    while (c != null && d == null) {
+        def f = c.declaredFields.find { it.name == 'repositoryContentDescriptor' }
+        if (f != null) { f.accessible = true; d = f.get(repo) }
+        c = c.superclass
+    }
+    if (d == null) return
+    def dc = d.getClass()
+    def specField = null
+    while (dc != null && specField == null) {
+        specField = dc.declaredFields.find { it.name == 'excludeSpecs' }
+        dc = dc.superclass
+    }
+    if (specField == null) return
+    specField.accessible = true
+    def specs = specField.get(d)
+    specs?.clear()
+}
+repositories.findAll { it instanceof org.gradle.api.artifacts.repositories.MavenArtifactRepository }
+            .each { stripExcludes(it) }
+
+// Style/header checks stay disabled for now (pending a formatting-sweep decision):
+// ClearSkies star-import check, FormatJ format check, Checkstyle (license headers).
+if (!hasProperty('runStyleChecks')) {
+    ['clearSkiesCheck', 'formatJavaCheck', 'checkstyleMain', 'checkstyleTest'].each {
+        tasks.named(it) { enabled = false }
+    }
+}
+
+tasks.withType(Javadoc).configureEach {
+    options.encoding = 'UTF-8'
+    // sources use the Sponge mixin @reason tag; doclint rejects unknown tags
+    options.addStringOption('Xdoclint:none', '-quiet')
+    options.addStringOption('tag', 'reason:cm:"Reason:"')
+}
+
+processResources {
+    rename '(.+_at.cfg)', 'META-INF/$1'
+}
+
+// Mixin refmap. reobfJar (Forge renamer) renames bytecode references, but not the
+// member names inside mixin annotations (@Inject method = "...", @At targets) or
+// private @Shadow members, which a production (SRG-named) Minecraft needs. Mixin's
+// annotation processor resolves them through CleanroomGradle's MCP->SRG mappings
+// into <mod_id>.refmap.json. Only the production jar carries it: the dev jar runs
+// on MCP names, where the missing refmap just means "use the names as written".
+// The processor also writes TSRG mappings for the mixin classes' own @Shadow /
+// @Overwrite members (which the renamer can't infer: a mixin class isn't a subclass
+// of its target); reobfJar renames with the vanilla mappings plus those.
+def refmapFile = layout.buildDirectory.file("mixin/${mod_id}.refmap.json")
+def mixinTsrg = layout.buildDirectory.file('mixin/mixin.tsrg')
+def reobfTsrg = layout.buildDirectory.file('mixin/reobf.tsrg')
+def mcp2srg = layout.buildDirectory.file('cleanroom_gradle/userdev/mcp2srg.tsrg')
+
+compileJava {
+    sourceCompatibility = targetCompatibility = JavaVersion.VERSION_25
+    outputs.files(refmapFile, mixinTsrg)
+    def refmapPath = refmapFile.get().asFile.absolutePath
+    def mixinTsrgPath = mixinTsrg.get().asFile.absolutePath
+    def mappingsPath = mcp2srg.get().asFile.absolutePath
+    options.compilerArgs.addAll([
+            "-AreobfTsrgFile=${mappingsPath}",
+            "-AoutRefMapFile=${refmapPath}",
+            "-AoutTsrgFile=${mixinTsrgPath}",
+            '-AdefaultObfuscationEnv=searge',
+            '-AmappingTypes=tsrg',
+            '-Aquiet=true',
+    ])
+}
+
+def mixinReobfMappings = tasks.register('mixinReobfMappings') {
+    description = 'Vanilla MCP->SRG mappings plus the mixin classes\' shadow mappings, for reobfJar.'
+    dependsOn(tasks.named('compileJava'))
+    def base = mcp2srg.get().asFile
+    def mixin = mixinTsrg.get().asFile
+    def out = reobfTsrg.get().asFile
+    inputs.files(base, mixin)
+    outputs.file(out)
+    doLast {
+        // The processor writes flat "class member [desc] srg" lines; the vanilla
+        // file is nested TSRG ("class class" then tab-indented members): convert
+        def byClass = new LinkedHashMap<String, List<String>>()
+        if (mixin.exists()) {
+            mixin.readLines('UTF-8').findAll { !it.isBlank() }.each { line ->
+                def parts = line.trim().split(' ')
+                byClass.computeIfAbsent(parts[0]) { [] } << parts[1..-1].join(' ')
+            }
+        }
+        def sb = new StringBuilder(base.getText('UTF-8').stripTrailing()).append('\n')
+        byClass.each { cls, members ->
+            sb.append(cls).append(' ').append(cls).append('\n')
+            members.each { sb.append('\t').append(it).append('\n') }
+        }
+        out.parentFile.mkdirs()
+        out.setText(sb.toString(), 'UTF-8')
+    }
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.compilerArgs.addAll(['-Xlint:deprecation', '-Xlint:unchecked'])
+}
+
+jar {
+    inputs.property('enableCleanMixHooks', enable_cleanmix_hooks)
+    archiveClassifier = 'dev'
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    if (!configurations.contain.dependencies.empty) {
+        into('/') {
+            from configurations.contain
+        }
+    }
+    // Unpacked 'embed' dependencies (none at the moment; META-INF/versions excluded so
+    // reobfJar's remapper never sees post-release multi-version classes it cannot parse)
+    from(provider { configurations.embed.collect { it.isDirectory() ? it : zipTree(it) } }) {
+        exclude 'META-INF/versions/**'
+    }
+    doFirst {
+        manifest {
+            def attributeMap = [
+                    'ModType': 'CRL',
+                    'Lwjgl3-Aware': true
+            ]
+            if (propertyBool('enable_cleanmix_hooks')) {
+                attributeMap['MixinConfigs'] = mixin_config_list
+            }
+            if (!configurations.contain.dependencies.empty) {
+                attributeMap['ContainedDeps'] = configurations.contain.collect { it.name }.join(' ')
+                attributeMap['NonModDeps'] = true
+            }
+            if (propertyBool('is_coremod')) {
+                attributeMap['FMLCorePlugin'] = propertyString('coremod_plugin_class_name')
+                if (propertyBool('coremod_includes_mod')) {
+                    attributeMap['FMLCorePluginContainsFMLMod'] = true
+                }
+            }
+            if (propertyBool('use_access_transformer')) {
+                attributeMap['FMLAT'] = access_transformer_locations
+            }
+            attributes(attributeMap)
+        }
+    }
+    finalizedBy(tasks.named('reobfJar'))
+}
+
+tasks.named('reobfJar').configure {
+    archiveClassifier.set('')
+    dependsOn(mixinReobfMappings)
+    map.setFrom(reobfTsrg)
+    // Add the refmap to the production jar (see compileJava)
+    def refmap = refmapFile.get().asFile
+    inputs.file(refmap)
+    doLast {
+        def jarFile = outputs.files.files.find { it.name.endsWith('.jar') }
+        def fs = java.nio.file.FileSystems.newFileSystem(jarFile.toPath(), (ClassLoader) null)
+        try {
+            java.nio.file.Files.copy(refmap.toPath(), fs.getPath("${mod_id}.refmap.json"),
+                    java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+            // The renamer's decompiler hint file has no use in a mod jar
+            java.nio.file.Files.deleteIfExists(fs.getPath('fernflower_abstract_parameter_names.txt'))
+        } finally {
+            fs.close()
+        }
+    }
+}
+
+tasks.register('prepareDevRun', Copy) {
+    dependsOn(tasks.named('jar'))
+    from(tasks.named('jar').flatMap { it.archiveFile })
+    into(layout.projectDirectory.dir('run/cleanroom-client/mods'))
+    doFirst {
+        // The jar name is git-derived and changes between builds; stale copies
+        // would register as duplicate mods in FML.
+        fileTree('run/cleanroom-client/mods') { include "${mod_id}-*.jar" }
+                .files.each { it.delete() }
+    }
+}
+
+tasks.withType(RunMinecraft).configureEach {
+    dependsOn(tasks.named('jar'))
+    if (name == 'runClient') {
+        dependsOn(tasks.named('prepareDevRun'))
+        doFirst {
+            // Kill any stale dev client still running: a live process keeps the
+            // session/lock and pollutes latest.log. Matched on command line, never
+            // window title (background/killed-window clients have no title).
+            def killCmd = "Get-CimInstance Win32_Process | Where-Object { \$_.Name -like 'java*' -and \$_.CommandLine -like '*cleanroom-client*' } | ForEach-Object { Write-Host ('[runClient] killing stale client PID ' + \$_.ProcessId); Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }"
+            try {
+                def killProc = new ProcessBuilder('powershell', '-NoProfile', '-Command', killCmd)
+                        .redirectErrorStream(true).start()
+                killProc.inputStream.eachLine { logger.lifecycle(it) }
+                killProc.waitFor()
+            } catch (Exception e) {
+                logger.warn('[runClient] stale-client kill failed: {}', e.toString())
+            }
+            // Match production: Cleanroom's Kirino engine stays OFF in dev, unless
+            // -Pstarlight_kirino=true. The Forge config is
+            // rewritten before launch so manual toggles don't stick.
+            def kirino = (project.findProperty('starlight_kirino') ?: 'false').toString().toBoolean()
+            if (kirino) systemProperty 'crl.dev.kirino', 'true'
+            def kirinoCfg = file('run/cleanroom-client/config/kirino_engine.cfg')
+            kirinoCfg.parentFile.mkdirs()
+            if (kirinoCfg.exists()) {
+                def t = kirinoCfg.text
+                t = t.replaceAll(/B:enable=\w+/, "B:enable=${kirino}")
+                t = t.replaceAll(/B:enableRenderDelegate=\w+/, "B:enableRenderDelegate=${kirino}")
+                t = t.replaceAll(/B:enableHDR=\w+/, "B:enableHDR=${kirino}")
+                kirinoCfg.text = t
+            }
+            classpath = classpath.filter {
+                !it.canonicalPath.equals(file('build/classes/java/main').canonicalPath) &&
+                        !it.canonicalPath.equals(file('build/resources/main').canonicalPath) &&
+                        // com.mojang:patchy ships a shaded Netty 4.1-era io.netty.bootstrap.Bootstrap but no
+                        // AbstractBootstrap. Cleanroom resolves Netty 4.2, so the inherited pair mismatches.
+                        !it.name.startsWith('patchy-')
+            }
+        }
+    }
+}
+
+apply from: 'gradle/scripts/publishing.gradle'
+apply from: 'gradle/scripts/extra.gradle'
