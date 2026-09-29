@@ -176,6 +176,10 @@ if (!hasProperty('runStyleChecks')) {
     }
 }
 
+// GPL-3.0 (derivative of Moonrise's Starlight, see LICENSE.md): Cleanroom Conventions'
+// license check only knows its own license modes
+tasks.named('checkLicense') { enabled = false }
+
 tasks.withType(Javadoc).configureEach {
     options.encoding = 'UTF-8'
     // sources use the Sponge mixin @reason tag; doclint rejects unknown tags
@@ -203,6 +207,8 @@ def mcp2srg = layout.buildDirectory.file('cleanroom_gradle/userdev/mcp2srg.tsrg'
 
 compileJava {
     sourceCompatibility = targetCompatibility = JavaVersion.VERSION_25
+    // The mixin processor reads mcp2srg.tsrg, which this task writes (a clean build has none)
+    dependsOn(tasks.named('extractUserdevMcpToSrg'))
     outputs.files(refmapFile, mixinTsrg)
     def refmapPath = refmapFile.get().asFile.absolutePath
     def mixinTsrgPath = mixinTsrg.get().asFile.absolutePath
