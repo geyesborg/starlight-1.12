@@ -119,7 +119,15 @@ Cleanroom versioning needs at least one git commit.
 - `ChunkClientMixin`: `Chunk.read` (whole chunk or sections from the server) queues the chunk
   for relighting and marks it not ready, so reads fall back to the packet's light until then.
 - `EntityRendererMixin`: once per frame before rendering, queued block changes are applied
-  and queued chunks are lit within a 2 ms budget (`-Dstarlight.clientBudgetMicros`).
+  and queued chunks are lit within a 1 ms budget (`-Dstarlight.clientBudgetMicros`).
+- Singleplayer: a queued client chunk whose integrated-server copy is lit takes the server's
+  visible light (`WorldLight.importLight`, exact copies of visible data + states, read across
+  threads) instead of recomputing it; multiplayer computes. Measured first 8 s after a
+  32-chunk join: 2.1-2.5 ms average frame when computing, 0.65-0.69 ms importing, vanilla
+  0.55-0.65 ms; client-vs-server check identical.
+- Server-thread cost (JFR, same join): vanilla's lighting ~0.5% (it only fills sky columns at
+  generation and defers the rest to relight checks), Starlight ~19% (complete light for ~4000
+  chunks at ~0.5 ms each; mostly sky propagation through air and BlockStateContainer.get).
 - Mirroring compares first (`copyVisibleIntoIfChanged`); on the client a section is re-rendered
   (`markBlockRangeForRenderUpdate`, exact 16^3 box) only when its mirrored light changed, so
   a singleplayer join (server light == client light) doesn't re-mesh everything.

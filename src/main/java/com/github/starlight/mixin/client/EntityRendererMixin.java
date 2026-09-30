@@ -13,13 +13,13 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
  * Once per frame, before the world renders: queued light changes are applied (a placed torch
- * lights up in the same frame) and arriving chunks are lit within a 2 ms budget.
+ * lights up in the same frame) and arriving chunks are lit (or, in singleplayer, take the server's light) within a 1 ms budget.
  */
 @Mixin(EntityRenderer.class)
 public abstract class EntityRendererMixin {
 
     @org.spongepowered.asm.mixin.Unique
-    private static final long STARLIGHT_FRAME_BUDGET_NANOS = Long.getLong("starlight.clientBudgetMicros", 2000L) * 1000L;
+    private static final long STARLIGHT_FRAME_BUDGET_NANOS = Long.getLong("starlight.clientBudgetMicros", 1000L) * 1000L;
 
     @Shadow @Final private Minecraft mc;
 

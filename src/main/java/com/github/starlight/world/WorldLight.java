@@ -5,6 +5,7 @@ import com.github.starlight.light.LightChunk;
 import com.github.starlight.light.LightWorld;
 import com.github.starlight.light.SWMRNibbleArray;
 import com.github.starlight.light.SkyStarLightEngine;
+import com.github.starlight.light.StarLightEngine;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
@@ -152,6 +153,41 @@ public final class WorldLight implements LightWorld {
         LightStats.chunkLoaded(System.nanoTime() - start);
     }
 
+    /**
+     * Singleplayer client: take the integrated server's finished light for this chunk (copies of
+     * its visible data and states) instead of computing the same result again, then register
+     * section emptiness as a loaded chunk does.
+     */
+    private void importLight(final Chunk chunk, final Chunk from) {
+        final LightChunk lc = (LightChunk)chunk, src = (LightChunk)from;
+        lc.starlight$setBlockNibbles(copyVisible(src.starlight$getBlockNibbles()));
+        lc.starlight$setSkyNibbles(this.hasSky ? copyVisible(src.starlight$getSkyNibbles()) : StarLightEngine.getFilledEmptyLight());
+        final Boolean[] empty = this.blockEngine.getEmptySectionsForChunk(lc);
+        if (this.skyEngine != null) {
+            this.skyEngine.forceHandleEmptySectionChanges(lc, empty.clone());
+        }
+        this.blockEngine.forceHandleEmptySectionChanges(lc, empty.clone());
+        ((StarlightChunkState)chunk).starlight$setLightReady(true);
+        this.mirrorChunk(chunk);
+        ++this.imported;
+    }
+
+    private static SWMRNibbleArray[] copyVisible(final SWMRNibbleArray[] from) {
+        final SWMRNibbleArray[] ret = new SWMRNibbleArray[from.length];
+        for (int i = 0; i < from.length; ++i) {
+            final SWMRNibbleArray.SaveState s = from[i] == null ? null : from[i].getVisibleState();
+            ret[i] = s == null ? new SWMRNibbleArray(null, true) : new SWMRNibbleArray(s.data(), s.state());
+        }
+        return ret;
+    }
+
+    private long imported;
+
+    /** Client chunks whose light was copied from the integrated server (diagnostics). */
+    public long importedChunks() {
+        return this.imported;
+    }
+
     /** Copy all of a chunk's light into its vanilla section arrays. */
     public void mirrorChunk(final Chunk chunk) {
         for (int y = MIN_SECTION; y <= MAX_SECTION; ++y) {
@@ -201,7 +237,13 @@ public final class WorldLight implements LightWorld {
         while (!this.clientToLight.isEmpty() && System.nanoTime() < deadline) {
             final long key = this.clientToLight.removeFirstLong();
             final Chunk chunk = (Chunk)this.getChunkForLighting((int)key, (int)(key >>> 32));
-            if (chunk != null) {
+            if (chunk == null) {
+                continue;
+            }
+            final Chunk serverChunk = ClientChunks.litServerChunk(this.world, chunk.x, chunk.z);
+            if (serverChunk != null) {
+                this.importLight(chunk, serverChunk);
+            } else {
                 this.lightChunk(chunk);
             }
         }

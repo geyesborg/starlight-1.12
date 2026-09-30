@@ -463,6 +463,19 @@ public final class SWMRNibbleArray {
         }
     }
 
+    // operation type: visible
+    /** Exact copy of the visible state and data (no zero/hidden folding as in save states); null for a null nibble. */
+    public SaveState getVisibleState() {
+        synchronized (this) {
+            final int state = this.stateVisible;
+            if (state == INIT_STATE_NULL) {
+                return null;
+            }
+            final byte[] data = this.storageVisible;
+            return new SaveState(data == null ? null : data.clone(), state);
+        }
+    }
+
     public record SaveState(byte[] data, int state) {
     }
 }
