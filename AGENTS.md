@@ -62,6 +62,55 @@ Cleanroom versioning needs at least one git commit.
   override the position-aware methods (detect by reflection, as gl46core does for
   FontRenderer subclasses); call the position-aware methods otherwise.
 
+## Engine port (phase 1, done)
+
+- `com.github.starlight.light`: `SWMRNibbleArray`, `StarLightEngine`, `BlockStarLightEngine`,
+  `SkyStarLightEngine` ported from Moonrise. 1.12 has no per-face occlusion, so the
+  conditionally-transparent propagation branches are removed: blocks are opacity + emission.
+- Platform layer: `LightWorld` (chunk lookup, sections as opaque objects, per-position
+  opacity/emission, light-update callback) and `LightChunk` (position, light-ready flag,
+  nibbles, emptiness maps). One implementation of each at runtime, so the calls inline.
+- Light sections -1..16 (index = sectionY + 1), block sections 0..15. Positions for
+  `blocksChangedInChunk` are packed int triples; relight chunk keys are `z << 32 | x`.
+- Tests (`gradle-dev.bat test`): `SyntheticWorld` + `StarLightEngineTest` compare every
+  position of a 5x5-chunk world with an exact light fixpoint (bucket-queue max-propagation)
+  after chunk-by-chunk lighting, edit batches (incl. whole sections filled/cleared) and a
+  full relight. Null sky sections are read like the game: bottom row of the first
+  initialised section above, 15 above all. A deliberately broken engine fails them.
+
+## Server integration (phase 2, done)
+
+- `world.WorldLight`: per-WorldServer Starlight (Moonrise's StarLightInterface for 1.12):
+  engines, change queue (block positions + section emptiness per chunk), readers, and the
+  mirror of Starlight's visible arrays into `ExtendedBlockStorage` arrays (`onLightUpdate`,
+  whole chunk after lighting/loading, new sections on creation). Chunk lookups use
+  `ChunkProviderServer.loadedChunks` directly (`getLoadedChunk` cancels queued unloads).
+- Mixins act on server worlds only (`world.isRemote` keeps vanilla until phase 3):
+  `WorldMixin.checkLightFor` queues; `ChunkMixin` keeps heightmap work in
+  `generateSkylightMap`/`relightBlock`, no-ops `propagateSkylightOcclusion`/`recheckGaps`/
+  `enqueueRelightChecks`, `checkLight()` only sets the populated flags, lights chunks in
+  `onLoad` (populated) and at the end of `populate(IChunkGenerator)`, queues section
+  emptiness changes in `setBlockState`, reads `getLightFor`/`getLightSubtracted` from
+  Starlight once lit, writes `setLightFor` through. Flush points: `WorldServer.tick` end,
+  `ChunkProviderServer.saveChunks`, `AnvilChunkLoader.saveChunk`, `SPacketChunkData` ctor.
+- Saved light: `world.LightSave` writes a `starlight` compound into the chunk Level tag
+  (version, per-light-section states block+sky, explicit data only where vanilla arrays
+  can't carry it: no ExtendedBlockStorage, sections -1/16, hidden block data). Reading
+  restores it (safe on Forge's chunk IO thread); `onLoad` then registers emptiness
+  (`forceHandleEmptySectionChanges`) and checks edges against loaded neighbours instead of
+  relighting. Vanilla arrays stay in the save, so worlds open without Starlight; chunks
+  without the tag (vanilla, Alfheim) are relit.
+- `StarlightMixinPlugin` disables every mixin when Alfheim, Phosphor, Hesperus or Cubic
+  Chunks is present (their mixin config / main class resource) and logs why.
+- Dev checks: `-Dstarlight.verify=true` compares a random lit chunk (5x5 neighbourhood
+  loaded) with exact light from the real blocks every 200 ticks; `-Dstarlight.verifyEdits=true`
+  makes 150 random block edits around it first. Results so far: every verified chunk exact
+  (idle, after edits, after reload from saved light). Lighting ~0.55 ms per chunk, loading
+  saved light ~0.15 ms per chunk.
+- Testing in a client: build, copy `build/libs/starlight-*-dev.jar` into gl46core's
+  `run/cleanroom-client/mods`, use its `Bench-Session` (auto-join), remove the jar after.
+  For save/load tests use `-world <save>` (not restored between launches).
+- Editing this file: it uses LF line endings; anchor-based scripted edits must match LF.
 ## Compatibility to handle
 
 Fluidlogged API (Alfheim has a hook), dynamic-lights mods (client light value),

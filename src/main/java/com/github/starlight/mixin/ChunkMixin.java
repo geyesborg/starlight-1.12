@@ -59,6 +59,9 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Override public int starlight$chunkZ() { return this.z; }
     @Override public boolean starlight$isLightReady() { return this.starlight$lightReady; }
     @Override public void starlight$setLightReady(final boolean ready) { this.starlight$lightReady = ready; }
+    @Unique private boolean starlight$savedLight;
+    @Override public void starlight$setSavedLight(final boolean saved) { this.starlight$savedLight = saved; }
+    @Override public boolean starlight$hasSavedLight() { return this.starlight$savedLight; }
     @Override public SWMRNibbleArray[] starlight$getBlockNibbles() { return this.starlight$blockNibbles; }
     @Override public void starlight$setBlockNibbles(final SWMRNibbleArray[] nibbles) { this.starlight$blockNibbles = nibbles; }
     @Override public SWMRNibbleArray[] starlight$getSkyNibbles() { return this.starlight$skyNibbles; }
@@ -159,7 +162,13 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Inject(method = "onLoad", at = @At("TAIL"))
     private void starlight$lightOnLoad(final CallbackInfo ci) {
         final WorldLight light = this.starlight$light();
-        if (light != null && this.isTerrainPopulated) {
+        if (light == null) {
+            return;
+        }
+        if (this.starlight$savedLight) {
+            this.starlight$savedLight = false;
+            light.loadSavedLight((Chunk)(Object)this);
+        } else if (this.isTerrainPopulated) {
             light.lightChunk((Chunk)(Object)this);
         }
     }

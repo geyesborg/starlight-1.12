@@ -124,6 +124,28 @@ public final class WorldLight implements LightWorld {
         LightStats.chunkLit(System.nanoTime() - start);
     }
 
+    /**
+     * A chunk loaded with saved Starlight light: register its section emptiness (initialising
+     * neighbour data where needed), then check its edges against loaded neighbours, which may
+     * have changed while it was unloaded.
+     */
+    public void loadSavedLight(final Chunk chunk) {
+        final LightChunk lc = (LightChunk)chunk;
+        final long start = System.nanoTime();
+        final Boolean[] empty = this.blockEngine.getEmptySectionsForChunk(lc);
+        if (this.skyEngine != null) {
+            this.skyEngine.forceHandleEmptySectionChanges(lc, empty.clone());
+        }
+        this.blockEngine.forceHandleEmptySectionChanges(lc, empty.clone());
+        ((StarlightChunkState)chunk).starlight$setLightReady(true);
+        if (this.skyEngine != null) {
+            this.skyEngine.checkChunkEdges(chunk.x, chunk.z);
+        }
+        this.blockEngine.checkChunkEdges(chunk.x, chunk.z);
+        this.mirrorChunk(chunk);
+        LightStats.chunkLoaded(System.nanoTime() - start);
+    }
+
     /** Copy all of a chunk's light into its vanilla section arrays. */
     public void mirrorChunk(final Chunk chunk) {
         for (int y = MIN_SECTION; y <= MAX_SECTION; ++y) {
@@ -250,5 +272,10 @@ public final class WorldLight implements LightWorld {
     /** Starlight state for chunks the port keeps on 1.12 Chunk (mixin). */
     public interface StarlightChunkState {
         void starlight$setLightReady(boolean ready);
+
+        /** Set when the chunk was read with valid saved Starlight light (consumed by onLoad). */
+        void starlight$setSavedLight(boolean saved);
+
+        boolean starlight$hasSavedLight();
     }
 }
