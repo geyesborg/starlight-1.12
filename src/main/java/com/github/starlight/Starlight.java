@@ -20,6 +20,10 @@ public class Starlight {
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent event) {
-        LOGGER.info("{} {} loaded", NAME, VERSION);
+        if (StarlightMixinPlugin.conflict != null) {
+            LOGGER.error("{} {} disabled: {} is installed", NAME, VERSION, StarlightMixinPlugin.conflict);
+        } else {
+            LOGGER.info("{} {} loaded", NAME, VERSION);
+        }
     }
 }
