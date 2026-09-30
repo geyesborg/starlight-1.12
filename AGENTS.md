@@ -136,6 +136,20 @@ Cleanroom versioning needs at least one git commit.
 - Dev check: `-Dstarlight.verifyClient=true` (singleplayer) compares a random client chunk
   (3x3 lit on both sides) with the integrated server's: Starlight light read across threads
   and the client's vanilla arrays. First run: 9/9 identical, 9/9 server chunks exact with edits.
+## Verification (phase 4)
+
+- Your world (Prism "New World", saved with Alfheim; tested on a copy, `slworld` in
+  gl46core's run saves): launch 1 relit ~4000 chunks (~0.6 ms each), launch 2 loaded ~2000
+  with saved light (~0.2 ms) and relit only chunks launch 1 never saved; server verifier 16/16
+  exact (with edits), client-vs-server 16/16 identical; frame renders normally.
+- Dedicated server: `gradle-dev.bat runServer` (dir `run/cleanroom-server`, dev jar in
+  `mods/`, class dirs filtered off the classpath like runClient, else the manifest's mixin
+  config is never registered and no hook applies). The task asks for offline mode and the
+  EULA on stdin but reads only one piped answer per launch: `eula.txt` / `server.properties`
+  (online-mode=false) in the run dir answer both (EULA accepted by the user for dev).
+  Verifier flags via `JAVA_TOOL_OPTIONS`. Result: no mixin/class-loading errors, 6/6 exact
+  with edits. `IntegratedServer$1/$2` "invalid side" errors at start are Forge's own probe
+  (`ForgeModContainer.modConstruction`), not Starlight.
 ## Compatibility to handle
 
 Fluidlogged API (Alfheim has a hook), dynamic-lights mods (client light value),

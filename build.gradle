@@ -319,22 +319,41 @@ tasks.named('reobfJar').configure {
     }
 }
 
-tasks.register('prepareDevRun', Copy) {
-    dependsOn(tasks.named('jar'))
-    from(tasks.named('jar').flatMap { it.archiveFile })
-    into(layout.projectDirectory.dir('run/cleanroom-client/mods'))
-    doFirst {
-        // The jar name is git-derived and changes between builds; stale copies
-        // would register as duplicate mods in FML.
-        fileTree('run/cleanroom-client/mods') { include "${mod_id}-*.jar" }
-                .files.each { it.delete() }
+// Dev runs load the mod from the dev jar in <run dir>/mods (its manifest registers the mixin
+// config), not from build/classes (filtered off the classpath below).
+['client', 'server'].each { side ->
+    tasks.register("prepareDevRun${side.capitalize()}", Copy) {
+        dependsOn(tasks.named('jar'))
+        from(tasks.named('jar').flatMap { it.archiveFile })
+        into(layout.projectDirectory.dir("run/cleanroom-${side}/mods"))
+        doFirst {
+            // The jar name is git-derived and changes between builds; stale copies
+            // would register as duplicate mods in FML.
+            fileTree("run/cleanroom-${side}/mods") { include "${mod_id}-*.jar" }
+                    .files.each { it.delete() }
+        }
     }
 }
 
 tasks.withType(RunMinecraft).configureEach {
     dependsOn(tasks.named('jar'))
+    if (name == 'runServer') {
+        workingDir(layout.projectDirectory.dir('run/cleanroom-server'))
+        dependsOn(tasks.named('prepareDevRunServer'))
+        def extraArgs = propertyString('extra_jvm_args')
+        if (extraArgs != null && !extraArgs.trim().isEmpty()) {
+            jvmArgs(*extraArgs.trim().split('\\s+'))
+        }
+        doFirst {
+            classpath = classpath.filter {
+                !it.canonicalPath.equals(file('build/classes/java/main').canonicalPath) &&
+                        !it.canonicalPath.equals(file('build/resources/main').canonicalPath) &&
+                        !it.name.startsWith('patchy-')
+            }
+        }
+    }
     if (name == 'runClient') {
-        dependsOn(tasks.named('prepareDevRun'))
+        dependsOn(tasks.named('prepareDevRunClient'))
         doFirst {
             // Kill any stale dev client still running: a live process keeps the
             // session/lock and pollutes latest.log. Matched on command line, never
