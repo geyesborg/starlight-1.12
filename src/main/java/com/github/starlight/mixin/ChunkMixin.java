@@ -190,45 +190,62 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
 
     // ── Section emptiness changes and new sections ──
 
-    @Unique private int starlight$changeSection = -1;
-    @Unique private boolean starlight$sectionWasNull, starlight$sectionWasEmpty;
+    // Emptiness of each block section as Starlight last saw it (set when the chunk is lit or
+    // loaded, updated as changes are queued). Compared at every setBlockState return, so nested
+    // setBlockState calls on the same chunk (breakBlock/onBlockAdded callbacks) and exceptions
+    // can't lose a change, as per-call state captured at HEAD would.
+    @Unique private boolean[] starlight$knownEmpty;
 
-    @Inject(method = "setBlockState", at = @At("HEAD"))
-    private void starlight$sectionBefore(final BlockPos pos, final IBlockState state, final CallbackInfoReturnable<IBlockState> cir) {
-        final int sy = pos.getY() >> 4;
-        if (sy < 0 || sy > 15 || this.starlight$light() == null) {
-            this.starlight$changeSection = -1;
-            return;
+    @Override
+    public void starlight$setKnownEmptiness(final Boolean[] empty) {
+        final boolean[] known = new boolean[empty.length];
+        for (int i = 0; i < known.length; ++i) {
+            known[i] = empty[i];
         }
-        final ExtendedBlockStorage ebs = this.storageArrays[sy];
-        this.starlight$changeSection = sy;
-        this.starlight$sectionWasNull = ebs == null;
-        this.starlight$sectionWasEmpty = ebs == null || ebs.isEmpty();
+        this.starlight$knownEmpty = known;
     }
 
     @Inject(method = "setBlockState", at = @At("RETURN"))
     private void starlight$sectionAfter(final BlockPos pos, final IBlockState state, final CallbackInfoReturnable<IBlockState> cir) {
-        final int sy = this.starlight$changeSection;
-        if (sy < 0) {
+        final int sy = pos.getY() >> 4;
+        final boolean[] known = this.starlight$knownEmpty;
+        if (sy < 0 || sy > 15 || !this.starlight$lightReady || known == null) {
+            return; // not lit yet: lighting reads the current sections
+        }
+        final WorldLight light = this.starlight$light();
+        if (light == null) {
             return;
         }
-        this.starlight$changeSection = -1;
-        final WorldLight light = this.starlight$light();
         final ExtendedBlockStorage ebs = this.storageArrays[sy];
-        if (this.starlight$sectionWasNull && ebs != null && this.starlight$lightReady) {
-            light.mirrorSection((Chunk)(Object)this, sy); // a new section starts with Starlight's light, not zeros
+        if (ebs != null) {
+            light.mirrorSection((Chunk)(Object)this, sy); // binds a newly created section's arrays to Starlight's light
         }
         final boolean empty = ebs == null || ebs.isEmpty();
-        if (empty != this.starlight$sectionWasEmpty) {
+        if (known[sy] != empty) {
+            known[sy] = empty;
             light.queueSectionChange(this.x, sy, this.z, empty);
         }
     }
-
     // ── Reads come from Starlight once the chunk is lit ──
+
+    /**
+     * Unlit server chunks (not populated yet): vanilla's rule for sections without data, sky 15
+     * where the column sees the sky. Their vanilla arrays hold zeros, since the vanilla sky fill
+     * at generation is skipped. Client chunks fall back to the packet's light instead.
+     */
+    @Unique
+    private int starlight$unlitSkyLight(final BlockPos pos) {
+        return this.world.provider.hasSkyLight() && this.canSeeSky(pos) ? 15 : 0;
+    }
+
+    @Shadow public abstract boolean canSeeSky(BlockPos pos);
 
     @Inject(method = "getLightFor", at = @At("HEAD"), cancellable = true)
     private void starlight$getLightFor(final EnumSkyBlock type, final BlockPos pos, final CallbackInfoReturnable<Integer> cir) {
         if (!this.starlight$lightReady) {
+            if (this.world != null && !this.world.isRemote && this.starlight$light() != null) {
+                cir.setReturnValue(type == EnumSkyBlock.SKY ? this.starlight$unlitSkyLight(pos) : 0);
+            }
             return;
         }
         final WorldLight light = this.starlight$light();
@@ -243,6 +260,9 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Inject(method = "getLightSubtracted", at = @At("HEAD"), cancellable = true)
     private void starlight$getLightSubtracted(final BlockPos pos, final int amount, final CallbackInfoReturnable<Integer> cir) {
         if (!this.starlight$lightReady) {
+            if (this.world != null && !this.world.isRemote && this.starlight$light() != null) {
+                cir.setReturnValue(Math.max(0, this.starlight$unlitSkyLight(pos) - amount));
+            }
             return;
         }
         final WorldLight light = this.starlight$light();
@@ -265,5 +285,6 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
             nibble.set(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, value);
             nibble.updateVisible();
         }
+        this.starlight$light().mirrorSection((Chunk)(Object)this, pos.getY() >> 4); // setLightFor may have created the section
     }
 }

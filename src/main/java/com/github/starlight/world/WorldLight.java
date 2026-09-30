@@ -126,6 +126,7 @@ public final class WorldLight implements LightWorld {
             this.skyEngine.light(lc, empty.clone());
         }
         this.blockEngine.light(lc, empty.clone());
+        ((StarlightChunkState)chunk).starlight$setKnownEmptiness(empty);
         ((StarlightChunkState)chunk).starlight$setLightReady(true);
         this.mirrorChunk(chunk);
         LightStats.chunkLit(System.nanoTime() - start);
@@ -144,6 +145,7 @@ public final class WorldLight implements LightWorld {
             this.skyEngine.forceHandleEmptySectionChanges(lc, empty.clone());
         }
         this.blockEngine.forceHandleEmptySectionChanges(lc, empty.clone());
+        ((StarlightChunkState)chunk).starlight$setKnownEmptiness(empty);
         ((StarlightChunkState)chunk).starlight$setLightReady(true);
         if (this.skyEngine != null) {
             this.skyEngine.checkChunkEdges(chunk.x, chunk.z);
@@ -167,6 +169,7 @@ public final class WorldLight implements LightWorld {
             this.skyEngine.forceHandleEmptySectionChanges(lc, empty.clone());
         }
         this.blockEngine.forceHandleEmptySectionChanges(lc, empty.clone());
+        ((StarlightChunkState)chunk).starlight$setKnownEmptiness(empty);
         ((StarlightChunkState)chunk).starlight$setLightReady(true);
         this.mirrorChunk(chunk);
         ++this.imported;
@@ -176,7 +179,7 @@ public final class WorldLight implements LightWorld {
         final SWMRNibbleArray[] ret = new SWMRNibbleArray[from.length];
         for (int i = 0; i < from.length; ++i) {
             final SWMRNibbleArray.SaveState s = from[i] == null ? null : from[i].getVisibleState();
-            ret[i] = s == null ? new SWMRNibbleArray(null, true) : new SWMRNibbleArray(s.data(), s.state());
+            ret[i] = s == null ? new SWMRNibbleArray(null, true) : SWMRNibbleArray.of(s.data(), s.state());
         }
         return ret;
     }
@@ -197,22 +200,28 @@ public final class WorldLight implements LightWorld {
     }
 
     /**
-     * Copy one section's visible light into its vanilla arrays (no-op without an
-     * ExtendedBlockStorage); on the client, a section whose light changed is re-rendered.
+     * Make the section's vanilla light arrays hold Starlight's visible data (bound, not copied:
+     * no duplicate arrays, updates publish straight into them); no-op without an
+     * ExtendedBlockStorage. On the client, a section whose light changed is re-rendered.
      */
     public void mirrorSection(final Chunk chunk, final int sectionY) {
-        final ExtendedBlockStorage ebs = chunk.getBlockStorageArray()[sectionY];
-        if (ebs == null) {
-            return;
-        }
-        final LightChunk lc = (LightChunk)chunk;
-        boolean changed = lc.starlight$getBlockNibbles()[sectionY + 1].copyVisibleIntoIfChanged(ebs.getBlockLight().getData());
-        if (this.hasSky && ebs.getSkyLight() != null) {
-            changed |= lc.starlight$getSkyNibbles()[sectionY + 1].copyVisibleIntoIfChanged(ebs.getSkyLight().getData());
-        }
-        if (changed && this.client) {
+        if (this.bindSection(chunk, sectionY) && this.client) {
             this.markForRender(chunk.x, sectionY, chunk.z);
         }
+    }
+
+    /** Bind (or re-bind, if a mod replaced the vanilla arrays) a section's light arrays; returns whether their contents changed. */
+    private boolean bindSection(final Chunk chunk, final int sectionY) {
+        final ExtendedBlockStorage ebs = chunk.getBlockStorageArray()[sectionY];
+        if (ebs == null) {
+            return false;
+        }
+        final LightChunk lc = (LightChunk)chunk;
+        boolean changed = lc.starlight$getBlockNibbles()[sectionY + 1].bindVisibleStorage(ebs.getBlockLight().getData());
+        if (this.hasSky && ebs.getSkyLight() != null) {
+            changed |= lc.starlight$getSkyNibbles()[sectionY + 1].bindVisibleStorage(ebs.getSkyLight().getData());
+        }
+        return changed;
     }
 
     private void markForRender(final int chunkX, final int sectionY, final int chunkZ) {
@@ -330,20 +339,9 @@ public final class WorldLight implements LightWorld {
         if (chunk == null) {
             return;
         }
-        final ExtendedBlockStorage ebs = chunk.getBlockStorageArray()[chunkY];
-        if (ebs == null) {
-            return;
-        }
-        final LightChunk lc = (LightChunk)chunk;
-        final boolean changed;
-        if (sky) {
-            changed = ebs.getSkyLight() != null && lc.starlight$getSkyNibbles()[chunkY + 1].copyVisibleIntoIfChanged(ebs.getSkyLight().getData());
-        } else {
-            changed = lc.starlight$getBlockNibbles()[chunkY + 1].copyVisibleIntoIfChanged(ebs.getBlockLight().getData());
-        }
-        if (!changed) {
-            return;
-        }
+        // The section's vanilla arrays are bound to Starlight's visible data, so they already hold
+        // the update; bindSection only acts when they aren't bound yet (or were replaced).
+        this.bindSection(chunk, chunkY);
         if (this.client) {
             this.markForRender(chunkX, chunkY, chunkZ);
         } else {
@@ -351,6 +349,30 @@ public final class WorldLight implements LightWorld {
         }
     }
 
+    /**
+     * Dev diagnostic ({@code -Dstarlight.memStats=true}, logged every 400 ticks for the overworld):
+     * where the light data of loaded chunks lives - private arrays, vanilla section arrays bound
+     * as visible storage, the shared all-15 array - and this thread's work-array pool.
+     */
+    public String memStats() {
+        long chunks = 0, priv = 0, bound = 0, full = 0;
+        for (final Chunk ch : ((ChunkProviderServer)this.world.getChunkProvider()).loadedChunks.values()) {
+            ++chunks;
+            final LightChunk lc = (LightChunk)ch;
+            for (final SWMRNibbleArray[] layer : new SWMRNibbleArray[][] {lc.starlight$getBlockNibbles(), lc.starlight$getSkyNibbles()}) {
+                for (final SWMRNibbleArray n : layer) {
+                    if (n != null) {
+                        final int[] k = n.storageKinds();
+                        priv += k[0];
+                        bound += k[1];
+                        full += k[2];
+                    }
+                }
+            }
+        }
+        return String.format("chunks %d | light arrays: private %d (%.1f MB), bound to vanilla %d, shared all-15 %d | work pool %d",
+                chunks, priv, priv * SWMRNibbleArray.ARRAY_SIZE / 1048576.0, bound, full, SWMRNibbleArray.poolSize());
+    }
     /** Apply the world's queued light changes if it has Starlight (flush points: saves, chunk packets). */
     public static void flush(final net.minecraft.world.World world) {
         final WorldLight light = world == null ? null : ((StarlightWorld)world).starlight$getLight();
@@ -362,6 +384,9 @@ public final class WorldLight implements LightWorld {
     /** Starlight state for chunks the port keeps on 1.12 Chunk (mixin). */
     public interface StarlightChunkState {
         void starlight$setLightReady(boolean ready);
+
+        /** Section emptiness Starlight has registered (set when lit or loaded; later changes are queued against it). */
+        void starlight$setKnownEmptiness(Boolean[] empty);
 
         /** Set when the chunk was read with valid saved Starlight light (consumed by onLoad). */
         void starlight$setSavedLight(boolean saved);

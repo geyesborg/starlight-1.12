@@ -28,6 +28,9 @@ public abstract class WorldServerMixin {
     private void starlight$flushAfterTick(final CallbackInfo ci) {
         final WorldLight light = this.starlight$getLight();
         light.propagateChanges();
+        if (Boolean.getBoolean("starlight.memStats") && ((WorldServer)(Object)this).getTotalWorldTime() % 400 == 0 && ((WorldServer)(Object)this).provider.getDimension() == 0) {
+            com.github.starlight.Starlight.LOGGER.info("[Starlight mem] {}", light.memStats());
+        }
         if (com.github.starlight.world.LightVerifier.ENABLED) {
             com.github.starlight.world.LightVerifier.tick((WorldServer)(Object)this, light);
         }

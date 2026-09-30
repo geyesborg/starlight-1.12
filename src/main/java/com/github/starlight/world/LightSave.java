@@ -109,7 +109,7 @@ public final class LightSave {
             if (data != null && data.length != SWMRNibbleArray.ARRAY_SIZE) {
                 return null;
             }
-            nibbles[i] = data == null && state > INIT ? null : new SWMRNibbleArray(data, state);
+            nibbles[i] = data == null && state > INIT ? null : SWMRNibbleArray.of(data, state);
             if (nibbles[i] == null) {
                 return null; // hidden without data: inconsistent
             }

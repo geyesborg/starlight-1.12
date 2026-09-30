@@ -37,9 +37,69 @@ class StarLightEngineTest {
         assertEquals(n.getVisible(3, 0, 5), below.getVisible(3, 15, 5), "extrude copies the bottom row into every row");
 
         final byte[] vanilla = new byte[SWMRNibbleArray.ARRAY_SIZE];
-        n.copyVisibleInto(vanilla);
+        assertTrue(n.bindVisibleStorage(vanilla), "binding fills the vanilla array");
         final int idx = 3 | (5 << 4) | (4 << 8);
-        assertEquals(11, (vanilla[idx >>> 1] >>> ((idx & 1) << 2)) & 0xF, "same nibble layout as NibbleArray");
+        assertEquals(11, nibble(vanilla, idx), "same nibble layout as NibbleArray");
+        assertTrue(!n.bindVisibleStorage(vanilla), "binding again changes nothing");
+    }
+
+    @Test
+    void boundVisibleStoragePublishesOnlyOnUpdateVisible() {
+        final SWMRNibbleArray n = new SWMRNibbleArray();
+        final byte[] vanilla = new byte[SWMRNibbleArray.ARRAY_SIZE];
+        vanilla[0] = 0x55; // stale vanilla data
+        assertTrue(n.bindVisibleStorage(vanilla), "no visible data: the vanilla array is zeroed");
+        assertEquals(0, vanilla[0]);
+
+        final int idx = 7 | (2 << 4) | (9 << 8);
+        n.set(idx, 13);
+        assertEquals(0, nibble(vanilla, idx), "an update is not visible before updateVisible");
+        n.updateVisible();
+        assertEquals(13, nibble(vanilla, idx), "updateVisible publishes into the bound vanilla array");
+        assertEquals(13, n.getVisible(idx));
+
+        n.set(idx, 4);
+        assertEquals(13, nibble(vanilla, idx), "the working copy is separate from the bound array");
+        n.updateVisible();
+        assertEquals(4, nibble(vanilla, idx));
+
+        n.setUninitialised();
+        n.updateVisible();
+        assertEquals(0, nibble(vanilla, idx), "back to no data: the vanilla array is zeroed");
+        n.set(idx, 9);
+        n.updateVisible();
+        assertEquals(9, nibble(vanilla, idx), "data again: published into the same bound array");
+
+        final byte[] replaced = new byte[SWMRNibbleArray.ARRAY_SIZE];
+        assertTrue(n.bindVisibleStorage(replaced), "a replaced vanilla array is re-bound and filled");
+        assertEquals(9, nibble(replaced, idx));
+    }
+
+    @Test
+    void fullSkySectionsShareOneArrayAndCopyOnWrite() {
+        final SWMRNibbleArray a = new SWMRNibbleArray(null, true), b = new SWMRNibbleArray(null, true);
+        for (final SWMRNibbleArray n : new SWMRNibbleArray[] {a, b}) {
+            n.setNonNull();
+            n.setFull();
+            n.updateVisible();
+        }
+        assertEquals(15, a.getVisible(100));
+        a.set(100, 3);
+        a.updateVisible();
+        assertEquals(3, a.getVisible(100), "a write to one full section lands in its own copy");
+        assertEquals(15, b.getVisible(100), "the other full section still reads 15");
+        assertEquals(15, b.getVisible(101));
+        final byte[] vanilla = new byte[SWMRNibbleArray.ARRAY_SIZE];
+        assertTrue(b.bindVisibleStorage(vanilla));
+        b.set(5, 0);
+        b.updateVisible();
+        assertEquals(0, nibble(vanilla, 5));
+        assertEquals(15, nibble(vanilla, 6));
+        assertEquals(3, a.getVisible(100));
+        assertEquals(15, a.getVisible(5), "binding and writing b left the shared array untouched");
+    }
+    private static int nibble(final byte[] data, final int index) {
+        return (data[index >>> 1] >>> ((index & 1) << 2)) & 0xF;
     }
 
     @Test

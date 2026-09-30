@@ -42,8 +42,30 @@ public final class SWMRNibbleArray {
         return new byte[ARRAY_SIZE];
     }
 
+    // 1.12: one shared, never-written array for visible data that is all 15 and not bound to a
+    // vanilla array (sky light of air sections above the terrain). Writers copy it first.
+    private static final byte[] FULL = new byte[ARRAY_SIZE];
+    static {
+        Arrays.fill(FULL, (byte)-1);
+    }
+
+    private static boolean isAllFull(final byte[] data) {
+        for (int i = 0, len = data.length / Long.BYTES; i < len; ++i) {
+            if (-1L != (long)LONG_VIEW.get(data, i << 3)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // Bounded: a large relight can free many arrays at once, and a thread-local pool never shrinks
+    private static final int MAX_POOLED = 256;
+
     private static void freeBytes(final byte[] bytes) {
-        WORKING_BYTES_POOL.get().addFirst(bytes);
+        final ArrayDeque<byte[]> pool = WORKING_BYTES_POOL.get();
+        if (pool.size() < MAX_POOLED) {
+            pool.addFirst(bytes);
+        }
     }
 
     // 1.12: NibbleArray always has storage (no "empty" layer as modern DataLayer)
@@ -61,6 +83,8 @@ public final class SWMRNibbleArray {
     private byte[] storageUpdating;
     private boolean updatingDirty; // only returns whether storageUpdating is dirty
     private volatile byte[] storageVisible;
+    // 1.12: a vanilla section light array that holds the visible data (see bindVisibleStorage), or null
+    private byte[] boundVisible;
 
     public SWMRNibbleArray() {
         this(null, false); // lazy init
@@ -340,10 +364,31 @@ public final class SWMRNibbleArray {
 
         synchronized (this) {
             if (this.stateUpdating == INIT_STATE_NULL || this.stateUpdating == INIT_STATE_UNINIT) {
+                if (this.boundVisible != null && this.storageVisible != null) {
+                    Arrays.fill(this.boundVisible, (byte)0); // vanilla sees no data as zeros
+                }
                 this.storageVisible = null;
             } else {
+                if (this.boundVisible == null && isAllFull(this.storageUpdating)) {
+                    // share the constant instead of keeping a private all-15 copy
+                    if (this.storageUpdating != this.storageVisible && this.storageUpdating != FULL) {
+                        freeBytes(this.storageUpdating);
+                    }
+                    this.storageUpdating = this.storageVisible = FULL;
+                    this.updatingDirty = false;
+                    this.stateVisible = this.stateUpdating;
+                    return true;
+                }
+                if (this.storageVisible == FULL) {
+                    this.storageVisible = null; // never write into the shared array
+                }
                 if (this.storageVisible == null) {
-                    this.storageVisible = this.storageUpdating.clone();
+                    if (this.boundVisible != null) {
+                        System.arraycopy(this.storageUpdating, 0, this.boundVisible, 0, ARRAY_SIZE);
+                        this.storageVisible = this.boundVisible;
+                    } else {
+                        this.storageVisible = this.storageUpdating.clone();
+                    }
                 } else {
                     if (this.storageUpdating != this.storageVisible) {
                         System.arraycopy(this.storageUpdating, 0, this.storageVisible, 0, ARRAY_SIZE);
@@ -374,16 +419,36 @@ public final class SWMRNibbleArray {
         }
     }
 
-    // operation type: visible
-    /** Copy the visible data into {@code into} (a vanilla section's array): zero for null/uninitialised/hidden. */
-    public void copyVisibleInto(final byte[] into) {
+    // operation type: updating (owner thread)
+    /**
+     * 1.12: make {@code into} (a vanilla section's light array) hold this nibble's visible data
+     * from now on, instead of a separate copy: updates are still written to a working array and
+     * published into it by {@link #updateVisible()}. Without visible data it holds zeros; hidden
+     * data stays readable (Starlight reads it too). Returns whether {@code into}'s contents changed.
+     */
+    public boolean bindVisibleStorage(final byte[] into) {
         synchronized (this) {
             final byte[] data = this.storageVisible;
-            if (data == null || this.stateVisible == INIT_STATE_HIDDEN) {
+            if (this.boundVisible == into && (data == null || data == into)) {
+                return false;
+            }
+            this.boundVisible = into;
+            if (data == null) {
+                if (isAllZero(into)) {
+                    return false;
+                }
                 Arrays.fill(into, (byte)0);
-            } else {
+                return true;
+            }
+            final boolean changed = !Arrays.equals(data, into);
+            if (changed) {
                 System.arraycopy(data, 0, into, 0, ARRAY_SIZE);
             }
+            if (this.storageUpdating == data) {
+                this.storageUpdating = into;
+            }
+            this.storageVisible = into;
+            return changed;
         }
     }
 
@@ -443,25 +508,6 @@ public final class SWMRNibbleArray {
         this.storageUpdating[i] = (byte)((this.storageUpdating[i] & (0xF0 >>> shift)) | (value << shift));
     }
 
-    // operation type: visible
-    /** As {@link #copyVisibleInto}, only writing when the values differ; returns whether they did. */
-    public boolean copyVisibleIntoIfChanged(final byte[] into) {
-        synchronized (this) {
-            final byte[] data = this.storageVisible;
-            if (data == null || this.stateVisible == INIT_STATE_HIDDEN) {
-                if (isAllZero(into)) {
-                    return false;
-                }
-                Arrays.fill(into, (byte)0);
-                return true;
-            }
-            if (Arrays.equals(data, into)) {
-                return false;
-            }
-            System.arraycopy(data, 0, into, 0, ARRAY_SIZE);
-            return true;
-        }
-    }
 
     // operation type: visible
     /** Exact copy of the visible state and data (no zero/hidden folding as in save states); null for a null nibble. */
@@ -474,6 +520,31 @@ public final class SWMRNibbleArray {
             final byte[] data = this.storageVisible;
             return new SaveState(data == null ? null : data.clone(), state);
         }
+    }
+
+    /**
+     * A nibble holding {@code data} (owned by the new nibble) in {@code state}; all-15 data shares
+     * the constant array (copied before any write), as updateVisible does.
+     */
+    public static SWMRNibbleArray of(final byte[] data, final int state) {
+        return new SWMRNibbleArray(data != null && state == INIT_STATE_INIT && isAllFull(data) ? FULL : data, state);
+    }
+
+    /** Diagnostics: storage arrays in use as [private, bound vanilla array, shared all-15]. */
+    public int[] storageKinds() {
+        synchronized (this) {
+            final int[] r = new int[3];
+            for (final byte[] a : new byte[][] {this.storageVisible, this.storageUpdating == this.storageVisible ? null : this.storageUpdating}) {
+                if (a == null) continue;
+                if (a == FULL) ++r[2]; else if (a == this.boundVisible) ++r[1]; else ++r[0];
+            }
+            return r;
+        }
+    }
+
+    /** Diagnostics: pooled work arrays of the calling thread. */
+    public static int poolSize() {
+        return WORKING_BYTES_POOL.get().size();
     }
 
     public record SaveState(byte[] data, int state) {

@@ -150,6 +150,27 @@ Cleanroom versioning needs at least one git commit.
   Verifier flags via `JAVA_TOOL_OPTIONS`. Result: no mixin/class-loading errors, 6/6 exact
   with edits. `IntegratedServer$1/$2` "invalid side" errors at start are Forge's own probe
   (`ForgeModContainer.modConstruction`), not Starlight.
+## Memory and robustness (post phase 4)
+
+- Visible light of a section with an ExtendedBlockStorage lives in the vanilla NibbleArray's
+  byte[] (`SWMRNibbleArray.bindVisibleStorage`, called by `WorldLight.mirrorSection`): no
+  duplicate arrays and no mirror copies; writes still go to a working array and
+  `updateVisible` publishes into the bound array (zeros when the nibble has no data). Re-bind
+  is automatic if a mod replaces the vanilla arrays (identity check on every mirror).
+- Unbound all-15 visible data (sky light of air sections above terrain) shares one constant
+  array (`FULL`), copied before any write (`updateVisible` never writes into it;
+  `SWMRNibbleArray.of` shares it for imported/loaded data). Work-array pool capped at 256.
+- Measured (server, 4225 chunks): private light arrays 37 MB -> 0.2-0.5 MB; ~13.7k bound,
+  ~6.1k shared all-15. `-Dstarlight.memStats=true` logs this every 400 ticks. Heap totals are
+  too noisy between runs (byte[] 327-462 MB with the same build) to measure this; count arrays.
+- Section emptiness: each chunk keeps the emptiness Starlight registered (`setKnownEmptiness`
+  when lit/loaded/imported) and `setBlockState` RETURN queues changes against it. The earlier
+  HEAD/RETURN instance fields lost changes when setBlockState re-entered on the same chunk
+  (breakBlock/onBlockAdded callbacks); don't reintroduce per-call state in instance fields.
+- Unlit server chunks (not populated yet) read like vanilla's no-data rule (sky 15 where the
+  column sees the sky, block 0): their vanilla arrays are zeros since the vanilla sky fill is
+  skipped. JFR attributing server samples to `postLightUpdate`'s client-only loop is a
+  line-attribution artifact of inlining (engines are created with the right side).
 ## Compatibility to handle
 
 Fluidlogged API (Alfheim has a hook), dynamic-lights mods (client light value),
