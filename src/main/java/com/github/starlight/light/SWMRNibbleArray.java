@@ -443,6 +443,26 @@ public final class SWMRNibbleArray {
         this.storageUpdating[i] = (byte)((this.storageUpdating[i] & (0xF0 >>> shift)) | (value << shift));
     }
 
+    // operation type: visible
+    /** As {@link #copyVisibleInto}, only writing when the values differ; returns whether they did. */
+    public boolean copyVisibleIntoIfChanged(final byte[] into) {
+        synchronized (this) {
+            final byte[] data = this.storageVisible;
+            if (data == null || this.stateVisible == INIT_STATE_HIDDEN) {
+                if (isAllZero(into)) {
+                    return false;
+                }
+                Arrays.fill(into, (byte)0);
+                return true;
+            }
+            if (Arrays.equals(data, into)) {
+                return false;
+            }
+            System.arraycopy(data, 0, into, 0, ARRAY_SIZE);
+            return true;
+        }
+    }
+
     public record SaveState(byte[] data, int state) {
     }
 }

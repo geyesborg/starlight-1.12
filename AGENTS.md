@@ -111,6 +111,23 @@ Cleanroom versioning needs at least one git commit.
   `run/cleanroom-client/mods`, use its `Bench-Session` (auto-join), remove the jar after.
   For save/load tests use `-world <save>` (not restored between launches).
 - Editing this file: it uses LF line endings; anchor-based scripted edits must match LF.
+## Client integration (phase 3, done)
+
+- The client world has its own `WorldLight` (`WorldClientMixin`); the server-side
+  `ChunkMixin` replacements apply to it too (they key on "world has Starlight"), except
+  chunk lighting on load/population, which is server-only.
+- `ChunkClientMixin`: `Chunk.read` (whole chunk or sections from the server) queues the chunk
+  for relighting and marks it not ready, so reads fall back to the packet's light until then.
+- `EntityRendererMixin`: once per frame before rendering, queued block changes are applied
+  and queued chunks are lit within a 2 ms budget (`-Dstarlight.clientBudgetMicros`).
+- Mirroring compares first (`copyVisibleIntoIfChanged`); on the client a section is re-rendered
+  (`markBlockRangeForRenderUpdate`, exact 16^3 box) only when its mirrored light changed, so
+  a singleplayer join (server light == client light) doesn't re-mesh everything.
+- Client-only classes stay out of common code (`ClientChunks`, `ClientLightVerifier`), so a
+  dedicated server never resolves them.
+- Dev check: `-Dstarlight.verifyClient=true` (singleplayer) compares a random client chunk
+  (3x3 lit on both sides) with the integrated server's: Starlight light read across threads
+  and the client's vanilla arrays. First run: 9/9 identical, 9/9 server chunks exact with edits.
 ## Compatibility to handle
 
 Fluidlogged API (Alfheim has a hook), dynamic-lights mods (client light value),

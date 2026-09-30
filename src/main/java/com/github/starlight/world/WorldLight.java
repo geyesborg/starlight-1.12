@@ -11,20 +11,25 @@ import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.WorldServer;
+import net.minecraft.world.World;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 import net.minecraft.world.gen.ChunkProviderServer;
 
 /**
- * Starlight for one server world (Moonrise's StarLightInterface, 1.12): the engines, the change
- * queue fed by World.checkLightFor and Chunk.setBlockState, light readers, and the mirror of
- * Starlight's arrays into the vanilla ExtendedBlockStorage arrays (saves, packets and mods read
- * those). Server thread only; the queue tolerates calls from other threads.
+ * Starlight for one world (Moonrise's StarLightInterface, 1.12): the engines, the change queue
+ * fed by World.checkLightFor and Chunk.setBlockState, light readers, and the mirror of
+ * Starlight's arrays into the vanilla ExtendedBlockStorage arrays (saves, packets, mods and
+ * Celeritas' chunk meshing read those). One thread per world (server thread, or the client
+ * thread for the client world); the queue tolerates calls from other threads.
+ *
+ * <p>Client worlds light arriving chunks within a per-frame time budget (until then reads fall
+ * back to the packet's light), and re-render a section only when its mirrored light changed.</p>
  */
 public final class WorldLight implements LightWorld {
 
-    private final WorldServer world;
+    private final World world;
+    private final boolean client;
     private final boolean hasSky;
     private final SkyStarLightEngine skyEngine;
     private final BlockStarLightEngine blockEngine;
@@ -39,8 +44,9 @@ public final class WorldLight implements LightWorld {
         Boolean[] sections;
     }
 
-    public WorldLight(final WorldServer world) {
+    public WorldLight(final World world) {
         this.world = world;
+        this.client = world.isRemote;
         this.hasSky = world.provider.hasSkyLight();
         this.skyEngine = this.hasSky ? new SkyStarLightEngine(this) : null;
         this.blockEngine = new BlockStarLightEngine(this);
@@ -154,16 +160,50 @@ public final class WorldLight implements LightWorld {
         chunk.markDirty();
     }
 
-    /** Copy one section's visible light into its vanilla arrays (no-op without an ExtendedBlockStorage). */
+    /**
+     * Copy one section's visible light into its vanilla arrays (no-op without an
+     * ExtendedBlockStorage); on the client, a section whose light changed is re-rendered.
+     */
     public void mirrorSection(final Chunk chunk, final int sectionY) {
         final ExtendedBlockStorage ebs = chunk.getBlockStorageArray()[sectionY];
         if (ebs == null) {
             return;
         }
         final LightChunk lc = (LightChunk)chunk;
-        lc.starlight$getBlockNibbles()[sectionY + 1].copyVisibleInto(ebs.getBlockLight().getData());
+        boolean changed = lc.starlight$getBlockNibbles()[sectionY + 1].copyVisibleIntoIfChanged(ebs.getBlockLight().getData());
         if (this.hasSky && ebs.getSkyLight() != null) {
-            lc.starlight$getSkyNibbles()[sectionY + 1].copyVisibleInto(ebs.getSkyLight().getData());
+            changed |= lc.starlight$getSkyNibbles()[sectionY + 1].copyVisibleIntoIfChanged(ebs.getSkyLight().getData());
+        }
+        if (changed && this.client) {
+            this.markForRender(chunk.x, sectionY, chunk.z);
+        }
+    }
+
+    private void markForRender(final int chunkX, final int sectionY, final int chunkZ) {
+        final int x = chunkX << 4, y = sectionY << 4, z = chunkZ << 4;
+        this.world.markBlockRangeForRenderUpdate(x, y, z, x + 15, y + 15, z + 15);
+    }
+
+    // ── Client: arriving chunks are lit within a per-frame budget ──
+
+    private final it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet clientToLight = new it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet();
+
+    /** A chunk's blocks arrived (or were replaced) from the server: light it again. */
+    public void queueClientChunk(final Chunk chunk) {
+        ((StarlightChunkState)chunk).starlight$setLightReady(false);
+        this.clientToLight.add(ChunkPos.asLong(chunk.x, chunk.z));
+    }
+
+    /** Client, once per frame: apply queued block changes, then light arriving chunks for up to {@code budgetNanos}. */
+    public void clientFrame(final long budgetNanos) {
+        this.propagateChanges();
+        final long deadline = System.nanoTime() + budgetNanos;
+        while (!this.clientToLight.isEmpty() && System.nanoTime() < deadline) {
+            final long key = this.clientToLight.removeFirstLong();
+            final Chunk chunk = (Chunk)this.getChunkForLighting((int)key, (int)(key >>> 32));
+            if (chunk != null) {
+                this.lightChunk(chunk);
+            }
         }
     }
 
@@ -200,9 +240,11 @@ public final class WorldLight implements LightWorld {
 
     @Override
     public LightChunk getChunkForLighting(final int chunkX, final int chunkZ) {
+        if (this.client) {
+            return (LightChunk)ClientChunks.getLoaded(this.world, chunkX, chunkZ);
+        }
         // loadedChunks, not getLoadedChunk: that one cancels a queued unload
-        final Chunk chunk = ((ChunkProviderServer)this.world.getChunkProvider()).loadedChunks.get(ChunkPos.asLong(chunkX, chunkZ));
-        return (LightChunk)chunk;
+        return (LightChunk)((ChunkProviderServer)this.world.getChunkProvider()).loadedChunks.get(ChunkPos.asLong(chunkX, chunkZ));
     }
 
     @Override
@@ -229,7 +271,7 @@ public final class WorldLight implements LightWorld {
 
     @Override
     public boolean isClientSide() {
-        return false;
+        return this.client;
     }
 
     @Override
@@ -251,14 +293,20 @@ public final class WorldLight implements LightWorld {
             return;
         }
         final LightChunk lc = (LightChunk)chunk;
+        final boolean changed;
         if (sky) {
-            if (ebs.getSkyLight() != null) {
-                lc.starlight$getSkyNibbles()[chunkY + 1].copyVisibleInto(ebs.getSkyLight().getData());
-            }
+            changed = ebs.getSkyLight() != null && lc.starlight$getSkyNibbles()[chunkY + 1].copyVisibleIntoIfChanged(ebs.getSkyLight().getData());
         } else {
-            lc.starlight$getBlockNibbles()[chunkY + 1].copyVisibleInto(ebs.getBlockLight().getData());
+            changed = lc.starlight$getBlockNibbles()[chunkY + 1].copyVisibleIntoIfChanged(ebs.getBlockLight().getData());
         }
-        chunk.markDirty();
+        if (!changed) {
+            return;
+        }
+        if (this.client) {
+            this.markForRender(chunkX, chunkY, chunkZ);
+        } else {
+            chunk.markDirty();
+        }
     }
 
     /** Apply the world's queued light changes if it has Starlight (flush points: saves, chunk packets). */

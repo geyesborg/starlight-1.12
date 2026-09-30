@@ -16,7 +16,11 @@
     "WorldMixin",
     "WorldServerMixin"
   ],
-  "client": [],
+  "client": [
+    "client.ChunkClientMixin",
+    "client.EntityRendererMixin",
+    "client.WorldClientMixin"
+  ],
   "server": [],
   "minVersion": "0.8.7"
 }

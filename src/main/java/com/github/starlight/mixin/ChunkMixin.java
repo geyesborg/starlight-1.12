@@ -24,8 +24,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 /**
  * Starlight's per-chunk light state, and on server worlds the replacement of vanilla's light
  * work: heightmaps are still maintained (rain, canSeeSky, spawning use them), light comes from
- * Starlight (queued block changes, chunk lighting after population). Client worlds keep vanilla
- * lighting until phase 3.
+ * Starlight (queued block changes, chunk lighting after population on the server, on arrival on
+ * the client).
  */
 @Mixin(Chunk.class)
 public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChunkState {
@@ -162,8 +162,8 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Inject(method = "onLoad", at = @At("TAIL"))
     private void starlight$lightOnLoad(final CallbackInfo ci) {
         final WorldLight light = this.starlight$light();
-        if (light == null) {
-            return;
+        if (light == null || this.world.isRemote) {
+            return; // client chunks are lit when their data arrives (ChunkClientMixin)
         }
         if (this.starlight$savedLight) {
             this.starlight$savedLight = false;
@@ -183,7 +183,7 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Inject(method = "populate(Lnet/minecraft/world/gen/IChunkGenerator;)V", at = @At("TAIL"))
     private void starlight$lightAfterPopulate(final IChunkGenerator generator, final CallbackInfo ci) {
         final WorldLight light = this.starlight$light();
-        if (light != null && !this.starlight$wasPopulated) {
+        if (light != null && !this.world.isRemote && !this.starlight$wasPopulated) {
             light.lightChunk((Chunk)(Object)this);
         }
     }
