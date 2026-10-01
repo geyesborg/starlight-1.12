@@ -380,7 +380,11 @@ public final class WorldLight implements LightWorld {
         if (this.client) {
             this.markForRender(chunkX, chunkY, chunkZ);
         } else {
-            chunk.markDirty();
+            // save only real light changes: state-only changes are recomputed on every load
+            final SWMRNibbleArray nibble = (sky ? ((LightChunk)chunk).starlight$getSkyNibbles() : ((LightChunk)chunk).starlight$getBlockNibbles())[chunkY + 1];
+            if (nibble != null && nibble.lastUpdateChangedData()) {
+                chunk.markDirty();
+            }
         }
     }
 

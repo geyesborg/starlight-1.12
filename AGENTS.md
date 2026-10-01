@@ -188,6 +188,11 @@ Cleanroom versioning needs at least one git commit.
 - Saved-light loads no longer mark chunks modified (`mirrorChunk(chunk, false)`): every chunk
   loaded with saved light was re-saved at the next autosave/quit. Updates that change light
   still mark it (onLightUpdate).
+- Only real light changes mark a chunk for saving: `SWMRNibbleArray.lastUpdateChangedData` (values
+  written, or data dropped). State-only changes (null/uninitialised/hidden) are recomputed from
+  section emptiness on every load, so they aren't saved; before this, loading re-saved ~1200
+  extra chunks per autosave in the user's world (LightBench `chunks_saved`, engine-neutral via
+  Forge `ChunkDataEvent.Save`).
 - `LightStats` logs chunks lit as new / with edge checks / loaded, every 500. Dev run, vanilla-
   saved world: 4500 lit as new at ~0.34 ms (was ~0.5-0.6 ms with edge checks); tick totals on
   this machine vary too much (idle tick 4.5-8.6 ms between runs) to show per-change gains -

@@ -85,6 +85,9 @@ public final class SWMRNibbleArray {
     private volatile byte[] storageVisible;
     // 1.12: a vanilla section light array that holds the visible data (see bindVisibleStorage), or null
     private byte[] boundVisible;
+    // whether the last updateVisible published written light values or dropped existing data
+    // (as opposed to a state-only change, which loading recomputes from section emptiness)
+    private boolean lastUpdateChangedData;
 
     public SWMRNibbleArray() {
         this(null, false); // lazy init
@@ -363,6 +366,8 @@ public final class SWMRNibbleArray {
         }
 
         synchronized (this) {
+            this.lastUpdateChangedData = this.updatingDirty
+                    || (this.storageVisible != null && (this.stateUpdating == INIT_STATE_NULL || this.stateUpdating == INIT_STATE_UNINIT));
             if (this.stateUpdating == INIT_STATE_NULL || this.stateUpdating == INIT_STATE_UNINIT) {
                 if (this.boundVisible != null && this.storageVisible != null) {
                     Arrays.fill(this.boundVisible, (byte)0); // vanilla sees no data as zeros
@@ -417,6 +422,12 @@ public final class SWMRNibbleArray {
                 default -> throw new IllegalStateException();
             };
         }
+    }
+
+    // operation type: updating (owner thread)
+    /** Whether the last {@link #updateVisible()} changed light values (writes, or data dropped), not just the state. */
+    public boolean lastUpdateChangedData() {
+        return this.lastUpdateChangedData;
     }
 
     // operation type: updating (owner thread)
