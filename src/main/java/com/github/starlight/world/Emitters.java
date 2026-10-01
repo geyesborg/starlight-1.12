@@ -13,10 +13,7 @@ import net.minecraft.world.chunk.IBlockStatePalette;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 
 /**
- * Whether a section can contain a light source, from its palette (Moonrise's maybeHas): a state
- * may emit if its light value is above 0, or if its block overrides Forge's position-aware
- * getLightValue (tile entities, fluidlogging, dynamic lights: unknown without the position).
- * The global registry palette (more than 256 states in a section) can't be listed: scan.
+ * From the section palette (it never shrinks); blocks with a position-aware getLightValue may always emit
  */
 final class Emitters {
 

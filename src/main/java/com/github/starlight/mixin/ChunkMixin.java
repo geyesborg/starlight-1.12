@@ -22,10 +22,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Starlight's per-chunk light state, and on server worlds the replacement of vanilla's light
- * work: heightmaps are still maintained (rain, canSeeSky, spawning use them), light comes from
- * Starlight (queued block changes, chunk lighting after population on the server, on arrival on
- * the client).
+ * On server worlds vanilla's light work is replaced; heightmaps are still maintained (rain,
+ * canSeeSky and spawning use them)
  */
 @Mixin(Chunk.class)
 public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChunkState {
@@ -52,8 +50,6 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Unique private boolean[] starlight$blockEmptiness;
     @Unique private boolean[] starlight$skyEmptiness;
     @Unique private volatile boolean starlight$lightReady;
-
-    // ── LightChunk ──
 
     @Override public int starlight$chunkX() { return this.x; }
     @Override public int starlight$chunkZ() { return this.z; }
@@ -85,8 +81,6 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     private WorldLight starlight$light() {
         return this.world == null ? null : ((StarlightWorld)this.world).starlight$getLight();
     }
-
-    // ── Vanilla light work replaced on server worlds ──
 
     /** Generation/section creation: keep the heightmap part, drop the sky light writes. */
     @Inject(method = "generateSkylightMap", at = @At("HEAD"), cancellable = true)
@@ -167,8 +161,6 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
         }
     }
 
-    // ── Chunk lighting: loaded populated chunks, and chunks that just finished population ──
-
     @Inject(method = "onLoad", at = @At("TAIL"))
     private void starlight$lightOnLoad(final CallbackInfo ci) {
         final WorldLight light = this.starlight$light();
@@ -198,8 +190,6 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
             light.lightChunk((Chunk)(Object)this, true); // just generated
         }
     }
-
-    // ── Section emptiness changes and new sections ──
 
     // Emptiness of each block section as Starlight last saw it (set when the chunk is lit or
     // loaded, updated as changes are queued). Compared at every setBlockState return, so nested
@@ -237,12 +227,10 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
             light.queueSectionChange(this.x, sy, this.z, empty);
         }
     }
-    // ── Reads come from Starlight once the chunk is lit ──
 
     /**
-     * Unlit server chunks (not populated yet): vanilla's rule for sections without data, sky 15
-     * where the column sees the sky. Their vanilla arrays hold zeros, since the vanilla sky fill
-     * at generation is skipped. Client chunks fall back to the packet's light instead.
+     * Unlit server chunks: vanilla's rule for sections without data (sky 15 where the column sees
+     * the sky); their arrays hold zeros
      */
     @Unique
     private int starlight$unlitSkyLight(final BlockPos pos) {

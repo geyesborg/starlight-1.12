@@ -36,12 +36,18 @@ public final class BlockStarLightEngine extends StarLightEngine {
     protected void setNibbleNull(final int chunkX, final int chunkY, final int chunkZ) {
         final SWMRNibbleArray nibble = this.getNibbleFromCache(chunkX, chunkY, chunkZ);
         if (nibble != null) {
-            // de-initialisation is not as straightforward as with sky data, since deinit of block light is typically
-            // because a block was removed - which can decrease light. with sky data, block breaking can only result
-            // in increases, and thus the existing sky block check will actually correctly propagate light through
-            // a null section. so in order to propagate decreases correctly, we can do a couple of things: not remove
-            // the data section, or do edge checks on ALL axis (x, y, z). however I do not want edge checks running
-            // for clients at all, as they are expensive. so we don't remove the section, but to maintain the appearence
+            // de-initialisation is not as straightforward as with sky data, since deinit of block
+            // light is typically
+            // because a block was removed - which can decrease light. with sky data, block breaking
+            // can only result
+            // in increases, and thus the existing sky block check will actually correctly propagate
+            // light through
+            // a null section. so in order to propagate decreases correctly, we can do a couple of
+            // things: not remove
+            // the data section, or do edge checks on ALL axis (x, y, z). however I do not want edge
+            // checks running
+            // for clients at all, as they are expensive. so we don't remove the section, but to
+            // maintain the appearence
             // of vanilla data management we "hide" them.
             nibble.setHidden();
         }
@@ -87,14 +93,16 @@ public final class BlockStarLightEngine extends StarLightEngine {
             );
         }
         // this also accounts for a change in emitted light that would cause a decrease
-        // this also accounts for the change of direction of propagation (i.e old block was full transparent, new block is full opaque or vice versa)
+        // this also accounts for the change of direction of propagation (i.e old block was full
+        // transparent, new block is full opaque or vice versa)
         // as it checks all neighbours (even if current level is 0)
         this.appendToDecreaseQueue(
                 ((worldX + (worldZ << 6) + (worldY << (6 + 6)) + encodeOffset) & ((1L << (6 + 6 + 16)) - 1))
                         | (currentLevel & 0xFL) << (6 + 6 + 16)
                         | (((long)ALL_DIRECTIONS_BITSET) << (6 + 6 + 16 + 4))
         );
-        // re-propagating neighbours (done by the decrease queue) will also account for opacity changes in this block
+        // re-propagating neighbours (done by the decrease queue) will also account for opacity
+        // changes in this block
     }
 
     @Override
@@ -144,7 +152,6 @@ public final class BlockStarLightEngine extends StarLightEngine {
         this.performLightDecrease();
     }
 
-    /** Light sources of the chunk: world positions packed as x, y, z triples. */
     protected IntArrayList getSources(final LightChunk chunk) {
         final IntArrayList sources = new IntArrayList();
 

@@ -11,9 +11,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Every vanilla light update (block and sky, all callers) goes through World.checkLightFor. On a
- * server world it becomes a queued Starlight block change, applied at the next flush point; the
- * return value ("light was updated") stays true as vanilla's does for loaded areas.
+ * Every vanilla light update goes through World.checkLightFor: on server worlds it becomes a queued
+ * Starlight change
  */
 @Mixin(World.class)
 public abstract class WorldMixin implements StarlightWorld {

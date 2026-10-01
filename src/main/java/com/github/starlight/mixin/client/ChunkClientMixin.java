@@ -13,8 +13,8 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Chunk data from the server (whole chunk or some sections): the client relights the chunk
- * itself, within its per-frame budget. Until then reads fall back to the packet's light.
+ * Chunk data from the server: the client relights the chunk within its frame budget, reading the
+ * packet's light until then
  */
 @Mixin(Chunk.class)
 public abstract class ChunkClientMixin {

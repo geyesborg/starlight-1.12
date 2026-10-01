@@ -29,8 +29,9 @@ public interface LightWorld {
     boolean isEmpty(Object section);
 
     /**
-     * Light opacity (0..255) of the block at {@code localIndex} ({@code x | z << 4 | y << 8}) of a
-     * non-null section, at the given world position. Propagation subtracts {@code max(1, opacity)}.
+     * Light opacity (0..255) at localIndex (x
+     * z << 4
+     * y << 8); propagation subtracts max(1, opacity)
      */
     int getOpacity(Object section, int localIndex, int worldX, int worldY, int worldZ);
 

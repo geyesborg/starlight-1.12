@@ -5,11 +5,6 @@ import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.Long2ObjectOpenHashMap;
 import java.util.Arrays;
 
-/**
- * A synthetic 1.12-shaped world for engine tests: chunks of 16 byte-array sections holding block
- * ids, a fixed opacity/emission table, and the change queue Starlight's interface would keep
- * (positions and section emptiness per chunk, flushed through both engines).
- */
 final class SyntheticWorld implements LightWorld {
 
     // id: air, stone, glass, water, leaves, glowstone, torch, lava, ice
@@ -72,7 +67,6 @@ final class SyntheticWorld implements LightWorld {
         return s == null ? AIR : s.blocks[(x & 15) | ((z & 15) << 4) | ((y & 15) << 8)];
     }
 
-    /** Set a block without light updates (world generation). */
     void setBlockRaw(final int x, final int y, final int z, final int id) {
         final Chunk c = this.chunks.get(key(x >> 4, z >> 4));
         Section s = c.sections[y >> 4];
@@ -88,11 +82,9 @@ final class SyntheticWorld implements LightWorld {
         s.blocks[idx] = (byte)id;
     }
 
-    // ── Change queue (what Starlight's interface keeps between flushes) ──
     private final Long2ObjectLinkedOpenHashMap<IntArrayList> pendingPositions = new Long2ObjectLinkedOpenHashMap<>();
     private final Long2ObjectOpenHashMap<Boolean[]> pendingSections = new Long2ObjectOpenHashMap<>();
 
-    /** Set a block and queue its light update (like World.checkLightFor). */
     void setBlock(final int x, final int y, final int z, final int id) {
         final Chunk c = this.chunks.get(key(x >> 4, z >> 4));
         final Section before = c.sections[y >> 4];
@@ -107,7 +99,6 @@ final class SyntheticWorld implements LightWorld {
         }
     }
 
-    /** Propagate queued changes through both engines (Starlight's propagateChanges). */
     void flush() {
         for (final var e : this.pendingPositions.long2ObjectEntrySet()) {
             final long k = e.getLongKey();
@@ -121,15 +112,12 @@ final class SyntheticWorld implements LightWorld {
         this.pendingSections.clear();
     }
 
-    /** Light a chunk with both engines (Starlight's lightChunk); fresh = just generated. */
     void lightChunk(final Chunk c, final boolean fresh) {
         final Boolean[] empty = this.blockEngine.getEmptySectionsForChunk(c);
         this.skyEngine.light(c, empty.clone(), fresh);
         this.blockEngine.light(c, empty.clone(), fresh);
         c.lightReady = true;
     }
-
-    // ── LightWorld ──
 
     @Override
     public LightChunk getChunkForLighting(final int chunkX, final int chunkZ) {
@@ -171,8 +159,6 @@ final class SyntheticWorld implements LightWorld {
         ++this.lightUpdates;
     }
 
-    // ── Reading light the way the game will (visible data) ──
-
     int getBlockLight(final int x, final int y, final int z) {
         final Chunk c = this.chunks.get(key(x >> 4, z >> 4));
         final SWMRNibbleArray n = c.blockNibbles[(y >> 4) + 1];
@@ -191,7 +177,7 @@ final class SyntheticWorld implements LightWorld {
         return 15;
     }
 
-    // ── Reference: exact light fixpoint over the loaded chunks, y -16..271 ──
+    // Reference: exact light fixpoint over the loaded chunks, y -16..271
 
     static final int MIN_Y = MIN_LIGHT_SECTION << 4, MAX_Y = (MAX_LIGHT_SECTION << 4) | 15, HEIGHT = MAX_Y - MIN_Y + 1;
 

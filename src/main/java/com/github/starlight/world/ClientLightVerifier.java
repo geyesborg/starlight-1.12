@@ -8,17 +8,15 @@ import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.multiplayer.ChunkProviderClient;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 import net.minecraft.world.gen.ChunkProviderServer;
 
 /**
- * Dev check ({@code -Dstarlight.verifyClient=true}, singleplayer): every 10 s, a random client
- * chunk that is lit on both sides is compared with the integrated server's chunk: Starlight's
- * visible light (read across threads, which the single-writer/multi-reader arrays allow) and the
- * client's vanilla section arrays (what chunk meshing reads). Skipped while either side has
- * queued changes, since the client applies block changes a little later than the server.
+ * Dev check (-Dstarlight.verifyClient=true): every 10 s a client chunk is compared with the
+ * integrated server's
  */
 public final class ClientLightVerifier {
 
@@ -60,7 +58,7 @@ public final class ClientLightVerifier {
         }
         final Chunk client = candidates.get(mc.world.rand.nextInt(candidates.size()));
         final Chunk server = ((ChunkProviderServer)serverWorld.getChunkProvider()).loadedChunks.get(
-                net.minecraft.util.math.ChunkPos.asLong(client.x, client.z));
+                ChunkPos.asLong(client.x, client.z));
 
         int lightDiff = 0, arrayDiff = 0;
         final StringBuilder sample = new StringBuilder();

@@ -1,5 +1,6 @@
 package com.github.starlight.mixin.client;
 
+import com.github.starlight.world.ClientLightVerifier;
 import com.github.starlight.world.StarlightWorld;
 import com.github.starlight.world.WorldLight;
 import net.minecraft.client.Minecraft;
@@ -7,18 +8,19 @@ import net.minecraft.client.renderer.EntityRenderer;
 import org.spongepowered.asm.mixin.Final;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Shadow;
+import org.spongepowered.asm.mixin.Unique;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
 /**
- * Once per frame, before the world renders: queued light changes are applied (a placed torch
- * lights up in the same frame) and arriving chunks are lit (or, in singleplayer, take the server's light) within a 1 ms budget.
+ * Once per frame before the world renders: queued changes are applied (a placed torch lights up the
+ * same frame) and arriving chunks are lit
  */
 @Mixin(EntityRenderer.class)
 public abstract class EntityRendererMixin {
 
-    @org.spongepowered.asm.mixin.Unique
+    @Unique
     private static final long STARLIGHT_FRAME_BUDGET_NANOS = Long.getLong("starlight.clientBudgetMicros", 1000L) * 1000L;
 
     @Shadow @Final private Minecraft mc;
@@ -31,8 +33,8 @@ public abstract class EntityRendererMixin {
         final WorldLight light = ((StarlightWorld)this.mc.world).starlight$getLight();
         if (light != null) {
             light.clientFrame(STARLIGHT_FRAME_BUDGET_NANOS);
-            if (com.github.starlight.world.ClientLightVerifier.ENABLED) {
-                com.github.starlight.world.ClientLightVerifier.frame(this.mc, light);
+            if (ClientLightVerifier.ENABLED) {
+                ClientLightVerifier.frame(this.mc, light);
             }
         }
     }

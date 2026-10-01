@@ -2,11 +2,6 @@ package com.github.starlight.world;
 
 import com.github.starlight.Starlight;
 
-/**
- * Chunk lighting counters (server thread): chunks lit as new (generated, or relit with no
- * neighbour holding saved light), lit with full edge checks, and loaded with saved light;
- * logged every 500.
- */
 public final class LightStats {
 
     private static final long[] COUNT = new long[3], NANOS = new long[3];

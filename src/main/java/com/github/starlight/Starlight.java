@@ -5,10 +5,6 @@ import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-/**
- * Starlight lighting engine (Spottedleaf, from Moonrise; GPL-3.0) ported to
- * Minecraft 1.12.2 on Cleanroom.
- */
 @Mod(modid = Starlight.MODID, name = Starlight.NAME, version = Starlight.VERSION)
 public class Starlight {
 

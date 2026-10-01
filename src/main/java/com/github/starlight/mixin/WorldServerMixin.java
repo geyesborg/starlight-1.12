@@ -1,5 +1,7 @@
 package com.github.starlight.mixin;
 
+import com.github.starlight.Starlight;
+import com.github.starlight.world.LightVerifier;
 import com.github.starlight.world.WorldLight;
 import net.minecraft.world.WorldServer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -8,7 +10,6 @@ import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 
-/** A server world's Starlight state, and the end-of-tick flush of queued light changes. */
 @Mixin(WorldServer.class)
 public abstract class WorldServerMixin {
 
@@ -29,10 +30,10 @@ public abstract class WorldServerMixin {
         final WorldLight light = this.starlight$getLight();
         light.propagateChanges();
         if (Boolean.getBoolean("starlight.memStats") && ((WorldServer)(Object)this).getTotalWorldTime() % 400 == 0 && ((WorldServer)(Object)this).provider.getDimension() == 0) {
-            com.github.starlight.Starlight.LOGGER.info("[Starlight mem] {}", light.memStats());
+            Starlight.LOGGER.info("[Starlight mem] {}", light.memStats());
         }
-        if (com.github.starlight.world.LightVerifier.ENABLED || com.github.starlight.world.LightVerifier.STALE_EDGE_TEST || com.github.starlight.world.LightVerifier.BURST > 0) {
-            com.github.starlight.world.LightVerifier.tick((WorldServer)(Object)this, light);
+        if (LightVerifier.ENABLED || LightVerifier.STALE_EDGE_TEST || LightVerifier.BURST > 0) {
+            LightVerifier.tick((WorldServer)(Object)this, light);
         }
     }
 }

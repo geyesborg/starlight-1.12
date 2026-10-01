@@ -8,7 +8,10 @@ import com.github.starlight.light.SkyStarLightEngine;
 import com.github.starlight.light.StarLightEngine;
 import it.unimi.dsi.fastutil.longs.Long2ObjectLinkedOpenHashMap;
 import it.unimi.dsi.fastutil.longs.LongIterator;
+import it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet;
 import it.unimi.dsi.fastutil.longs.LongOpenHashSet;
+import java.util.Arrays;
+import java.util.concurrent.ThreadLocalRandom;
 import net.minecraft.block.state.IBlockState;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
@@ -18,14 +21,8 @@ import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 import net.minecraft.world.gen.ChunkProviderServer;
 
 /**
- * Starlight for one world (Moonrise's StarLightInterface, 1.12): the engines, the change queue
- * fed by World.checkLightFor and Chunk.setBlockState, light readers, and the mirror of
- * Starlight's arrays into the vanilla ExtendedBlockStorage arrays (saves, packets, mods and
- * Celeritas' chunk meshing read those). One thread per world (server thread, or the client
- * thread for the client world); the queue tolerates calls from other threads.
- *
- * <p>Client worlds light arriving chunks within a per-frame time budget (until then reads fall
- * back to the packet's light), and re-render a section only when its mirrored light changed.</p>
+ * Starlight for one world (Moonrise's StarLightInterface): engines, change queue, readers, and the
+ * vanilla array binding
  */
 public final class WorldLight implements LightWorld {
 
@@ -52,8 +49,6 @@ public final class WorldLight implements LightWorld {
         this.skyEngine = this.hasSky ? new SkyStarLightEngine(this) : null;
         this.blockEngine = new BlockStarLightEngine(this);
     }
-
-    // ── Queue (called where vanilla would update light immediately) ──
 
     public synchronized void queueBlockChange(final BlockPos pos) {
         if (pos.getY() < 0 || pos.getY() > 255) {
@@ -112,12 +107,7 @@ public final class WorldLight implements LightWorld {
         }
     }
 
-    // ── Chunk lifecycle ──
-
-    /**
-     * Light a populated chunk from scratch; it becomes readable (and propagated into) afterwards.
-     * {@code fresh}: just generated (see {@link StarLightEngine#light}).
-     */
+    /** fresh: just generated (see StarLightEngine.light) */
     public void lightChunk(final Chunk chunk, final boolean fresh) {
         final LightChunk lc = (LightChunk)chunk;
         if (lc.starlight$isLightReady()) {
@@ -125,7 +115,7 @@ public final class WorldLight implements LightWorld {
         }
         final long start = System.nanoTime();
         bumpEdges(chunk);
-        java.util.Arrays.fill(((StarlightChunkState)chunk).starlight$edgeRecords(), 0L);
+        Arrays.fill(((StarlightChunkState)chunk).starlight$edgeRecords(), 0L);
         final Boolean[] empty = this.blockEngine.getEmptySectionsForChunk(lc);
         if (this.skyEngine != null) {
             this.skyEngine.light(lc, empty.clone(), fresh);
@@ -141,9 +131,8 @@ public final class WorldLight implements LightWorld {
     }
 
     /**
-     * A chunk loaded with saved Starlight light: register its section emptiness (initialising
-     * neighbour data where needed), then check its edges against loaded neighbours, which may
-     * have changed while it was unloaded.
+     * Loaded with saved light: register section emptiness, then check edges only where a neighbour
+     * may have changed
      */
     public void loadSavedLight(final Chunk chunk) {
         final LightChunk lc = (LightChunk)chunk;
@@ -176,9 +165,7 @@ public final class WorldLight implements LightWorld {
     }
 
     /**
-     * Singleplayer client: take the integrated server's finished light for this chunk (copies of
-     * its visible data and states) instead of computing the same result again, then register
-     * section emptiness as a loaded chunk does.
+     * Singleplayer client: copy the integrated server's finished light instead of computing it again
      */
     private void importLight(final Chunk chunk, final Chunk from) {
         final LightChunk lc = (LightChunk)chunk, src = (LightChunk)from;
@@ -194,7 +181,6 @@ public final class WorldLight implements LightWorld {
         this.mirrorChunk(chunk, false);
         ++this.imported;    }
 
-
     private static SWMRNibbleArray[] copyVisible(final SWMRNibbleArray[] from) {
         final SWMRNibbleArray[] ret = new SWMRNibbleArray[from.length];
         for (int i = 0; i < from.length; ++i) {
@@ -206,12 +192,9 @@ public final class WorldLight implements LightWorld {
 
     private long imported;
 
-    /** Client chunks whose light was copied from the integrated server (diagnostics). */
     public long importedChunks() {
         return this.imported;
     }
-
-    // ── Edge versions: skip the border check on load where neither side changed ──
 
     // dev: -Dstarlight.checkAllEdges=true restores the full border check on every load (A/B)
     private static final boolean CHECK_ALL_EDGES = Boolean.getBoolean("starlight.checkAllEdges");
@@ -219,10 +202,9 @@ public final class WorldLight implements LightWorld {
     private static final int[][] SIDES = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}; // +x, -x, +z, -z (opposite = i ^ 1)
 
     public static long newEdgeVersion() {
-        return java.util.concurrent.ThreadLocalRandom.current().nextLong() | 1L; // never 0 (= unknown)
+        return ThreadLocalRandom.current().nextLong() | 1L; // never 0 (= unknown)
     }
 
-    /** The chunk's light changed: every side gets a new version (neighbours' records no longer match). */
     public static void bumpEdges(final Chunk chunk) {
         final long[] v = ((StarlightChunkState)chunk).starlight$edgeVersions();
         for (int i = 0; i < 4; ++i) {
@@ -236,8 +218,7 @@ public final class WorldLight implements LightWorld {
     }
 
     /**
-     * The chunk and its lit neighbours are consistent now (queued changes applied): record each
-     * other's versions. Called after lighting or loading a chunk and before saving it.
+     * Called after lighting or loading a chunk and before saving it, when queued changes are applied
      */
     public void syncEdgeRecords(final Chunk chunk) {
         final StarlightChunkState self = (StarlightChunkState)chunk;
@@ -251,9 +232,8 @@ public final class WorldLight implements LightWorld {
     }
 
     /**
-     * Sides of a chunk loaded with saved light that need the border check: a lit neighbour whose
-     * version differs from the one this chunk recorded, or that recorded a different version of
-     * this chunk. Equal on both sides means neither changed since they were last consistent.
+     * A side needs the check if either record disagrees: equal on both sides means neither changed
+     * since they were last consistent
      */
     private int edgesToCheck(final Chunk chunk) {
         final StarlightChunkState self = (StarlightChunkState)chunk;
@@ -272,7 +252,6 @@ public final class WorldLight implements LightWorld {
         return mask;
     }
 
-    /** This chunk's version and each lit neighbour's version facing it (0 where there is none). */
     private long[] sideVersions(final Chunk chunk) {
         final long[] v = new long[8];
         final long[] own = ((StarlightChunkState)chunk).starlight$edgeVersions();
@@ -284,7 +263,6 @@ public final class WorldLight implements LightWorld {
         return v;
     }
 
-    /** Sides whose light changed (this chunk's or the neighbour's version) since {@code before}. */
     private int changedSides(final Chunk chunk, final long[] before) {
         final long[] after = this.sideVersions(chunk);
         int mask = 0;
@@ -297,10 +275,8 @@ public final class WorldLight implements LightWorld {
     }
 
     /**
-     * A chunk saved without Starlight light can be lit like a new one (no full edge check) when
-     * no loaded neighbour carries light from its save: only such light can reflect this chunk's
-     * older blocks. In-game a chunk can't change while unloaded, and a chunk Starlight lit is
-     * saved with its light, so neighbours lit in this session never hold stale light from it.
+     * Lit like a new chunk when no loaded neighbour has light from its save: only such light can
+     * reflect this chunk's older blocks
      */
     public boolean canLightAsNew(final Chunk chunk) {
         for (int dx = -1; dx <= 1; ++dx) {
@@ -314,11 +290,7 @@ public final class WorldLight implements LightWorld {
         return true;
     }
 
-    /**
-     * Bind all of a chunk's vanilla section arrays to its light. {@code modified}: the light is
-     * new (lit from scratch) and must be saved; a chunk loaded with saved light isn't, unless a
-     * later update changes it (onLightUpdate marks it then), so it isn't re-saved for nothing.
-     */
+    /** modified: new light that must be saved; saved light loaded unchanged isn't re-saved */
     public void mirrorChunk(final Chunk chunk, final boolean modified) {
         for (int y = MIN_SECTION; y <= MAX_SECTION; ++y) {
             this.mirrorSection(chunk, y);
@@ -328,18 +300,13 @@ public final class WorldLight implements LightWorld {
         }
     }
 
-    /**
-     * Make the section's vanilla light arrays hold Starlight's visible data (bound, not copied:
-     * no duplicate arrays, updates publish straight into them); no-op without an
-     * ExtendedBlockStorage. On the client, a section whose light changed is re-rendered.
-     */
+    /** Bound, not copied: no duplicate arrays, updates publish straight into them */
     public void mirrorSection(final Chunk chunk, final int sectionY) {
         if (this.bindSection(chunk, sectionY) && this.client) {
             this.markForRender(chunk.x, sectionY, chunk.z);
         }
     }
 
-    /** Bind (or re-bind, if a mod replaced the vanilla arrays) a section's light arrays; returns whether their contents changed. */
     private boolean bindSection(final Chunk chunk, final int sectionY) {
         final ExtendedBlockStorage ebs = chunk.getBlockStorageArray()[sectionY];
         if (ebs == null) {
@@ -358,17 +325,13 @@ public final class WorldLight implements LightWorld {
         this.world.markBlockRangeForRenderUpdate(x, y, z, x + 15, y + 15, z + 15);
     }
 
-    // ── Client: arriving chunks are lit within a per-frame budget ──
+    private final LongLinkedOpenHashSet clientToLight = new LongLinkedOpenHashSet();
 
-    private final it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet clientToLight = new it.unimi.dsi.fastutil.longs.LongLinkedOpenHashSet();
-
-    /** A chunk's blocks arrived (or were replaced) from the server: light it again. */
     public void queueClientChunk(final Chunk chunk) {
         ((StarlightChunkState)chunk).starlight$setLightReady(false);
         this.clientToLight.add(ChunkPos.asLong(chunk.x, chunk.z));
     }
 
-    /** Client, once per frame: apply queued block changes, then light arriving chunks for up to {@code budgetNanos}. */
     public void clientFrame(final long budgetNanos) {
         this.propagateChanges();
         final long deadline = System.nanoTime() + budgetNanos;
@@ -386,8 +349,6 @@ public final class WorldLight implements LightWorld {
             }
         }
     }
-
-    // ── Readers (visible data) ──
 
     public int getBlockLight(final Chunk chunk, final int x, final int y, final int z) {
         if (y < 0 || y > 255) {
@@ -415,8 +376,6 @@ public final class WorldLight implements LightWorld {
         }
         return 15;
     }
-
-    // ── LightWorld ──
 
     @Override
     public LightChunk getChunkForLighting(final int chunkX, final int chunkZ) {
@@ -494,11 +453,6 @@ public final class WorldLight implements LightWorld {
         }
     }
 
-    /**
-     * Dev diagnostic ({@code -Dstarlight.memStats=true}, logged every 400 ticks for the overworld):
-     * where the light data of loaded chunks lives - private arrays, vanilla section arrays bound
-     * as visible storage, the shared all-15 array - and this thread's work-array pool.
-     */
     public String memStats() {
         long chunks = 0, priv = 0, bound = 0, full = 0;
         for (final Chunk ch : ((ChunkProviderServer)this.world.getChunkProvider()).loadedChunks.values()) {
@@ -518,15 +472,13 @@ public final class WorldLight implements LightWorld {
         return String.format("chunks %d | light arrays: private %d (%.1f MB), bound to vanilla %d, shared all-15 %d | work pool %d",
                 chunks, priv, priv * SWMRNibbleArray.ARRAY_SIZE / 1048576.0, bound, full, SWMRNibbleArray.poolSize());
     }
-    /** Apply the world's queued light changes if it has Starlight (flush points: saves, chunk packets). */
-    public static void flush(final net.minecraft.world.World world) {
+    public static void flush(final World world) {
         final WorldLight light = world == null ? null : ((StarlightWorld)world).starlight$getLight();
         if (light != null) {
             light.propagateChanges();
         }
     }
 
-    /** Starlight state for chunks the port keeps on 1.12 Chunk (mixin). */
     public interface StarlightChunkState {
         void starlight$setLightReady(boolean ready);
 

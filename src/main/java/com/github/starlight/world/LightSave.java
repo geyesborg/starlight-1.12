@@ -6,17 +6,13 @@ import com.github.starlight.light.LightWorld;
 import com.github.starlight.light.SWMRNibbleArray;
 import com.github.starlight.light.StarLightEngine;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.nbt.NBTTagList;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.chunk.storage.ExtendedBlockStorage;
 
 /**
- * Starlight light in chunk NBT (Moonrise's SaveUtil for 1.12). A {@code starlight} compound in
- * the Level tag holds a format version, the state of every light section (-1..16, block then
- * sky) and explicit data only where the vanilla section arrays can't carry it: sections without
- * an ExtendedBlockStorage (including -1 and 16) and hidden block sections. Initialised data of
- * existing sections is read back from the vanilla arrays, which hold exactly Starlight's values
- * (they are mirrored). Vanilla's light arrays stay in the save, so the world still opens without
- * Starlight; chunks without the tag (vanilla, Alfheim) are relit on load.
+ * Starlight light in chunk NBT (Moonrise's SaveUtil): format version, every light section's state,
+ * and data only where vanilla's arrays can't hold it
  */
 public final class LightSave {
 
@@ -37,7 +33,7 @@ public final class LightSave {
             // Vanilla stores the section light arrays by reference and the file is written later on
             // the IO thread: light updates in between would end up on disk with older blocks and
             // tag. Snapshot them now, while they are consistent (queued changes were just applied).
-            final net.minecraft.nbt.NBTTagList sections = level.getTagList("Sections", 10);
+            final NBTTagList sections = level.getTagList("Sections", 10);
             for (int i = 0; i < sections.tagCount(); ++i) {
                 final NBTTagCompound section = sections.getCompoundTagAt(i);
                 for (final String key : new String[] {"BlockLight", "SkyLight"}) {
@@ -152,7 +148,6 @@ public final class LightSave {
         return r;
     }
 
-    /** The 4 longs stored under key; versions must be non-zero (0 marks unknown), records may be 0. */
     private static long[] longArray(final NBTTagCompound tag, final String key) {
         final int[] a = tag.getIntArray(key);
         if (a.length != 8) {

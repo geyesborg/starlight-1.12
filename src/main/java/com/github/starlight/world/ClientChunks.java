@@ -20,8 +20,8 @@ final class ClientChunks {
     }
 
     /**
-     * Singleplayer: the integrated server's copy of this chunk if Starlight has lit it there, else
-     * null. Its visible light may be read from this thread (single-writer/multi-reader arrays).
+     * Singleplayer: the integrated server's lit copy of this chunk, else null (its visible light is
+     * safe to read from this thread)
      */
     static Chunk litServerChunk(final World clientWorld, final int chunkX, final int chunkZ) {
         final IntegratedServer server = Minecraft.getMinecraft().getIntegratedServer();

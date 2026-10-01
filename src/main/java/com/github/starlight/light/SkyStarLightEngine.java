@@ -371,7 +371,8 @@ public final class SkyStarLightEngine extends StarLightEngine {
                     if (nibble == null) {
                         // advance currY to the the top of the section below
                         currY = (currY) & (~15);
-                        // note: this value ^ is actually 1 above the top, but the loop decrements by 1 so we actually
+                        // note: this value ^ is actually 1 above the top, but the loop decrements
+                        // by 1 so we actually
                         // end up there
                         continue;
                     }
@@ -549,7 +550,8 @@ public final class SkyStarLightEngine extends StarLightEngine {
         }
     }
 
-    // delaying the light set is useful for block changes since they need to worry about initialising nibblearrays
+    // delaying the light set is useful for block changes since they need to worry about
+    // initialising nibblearrays
     // while also queueing light at the same time (initialising nibblearrays might depend on nibbles above, so
     // clobbering the light values will result in broken propagation)
     protected final int tryPropagateSkylight(final int worldX, int startY, final int worldZ,

@@ -14,12 +14,6 @@ import java.util.List;
 import java.util.function.IntConsumer;
 import java.util.function.LongConsumer;
 
-/**
- * Breadth-first light propagation over a 5x5 chunk cache (Starlight). 1.12 port: blocks are
- * described only by opacity and emission (no per-face occlusion), so Moonrise's
- * conditionally-transparent propagation branches are gone; sections come from {@link LightWorld}.
- * One engine instance per world and thread.
- */
 public abstract class StarLightEngine {
 
     protected static final AxisDirection[] DIRECTIONS = AxisDirection.values();
@@ -64,14 +58,17 @@ public abstract class StarLightEngine {
         }
     }
 
-    // I'd like to thank https://www.seedofandromeda.com/blogs/29-fast-flood-fill-lighting-in-a-blocky-voxel-game-pt-1
+    // I'd like to thank
+    // https://www.seedofandromeda.com/blogs/29-fast-flood-fill-lighting-in-a-blocky-voxel-game-pt-1
     // for explaining how light propagates via breadth-first search
 
-    // While the above is a good start to understanding the general idea of what the general principles are, it's not
+    // While the above is a good start to understanding the general idea of what the general
+    // principles are, it's not
     // exactly how the vanilla light engine should behave for minecraft.
 
     // similar to the above, except the chunk section indices vary from [-1, 1], or [0, 2]
-    // for the y chunk section it's from [minLightSection, maxLightSection] or [0, maxLightSection - minLightSection]
+    // for the y chunk section it's from [minLightSection, maxLightSection] or [0, maxLightSection -
+    // minLightSection]
     // index = x + (z * 5) + (y * 25)
     // null index indicates the chunk section doesn't exist, is empty (only air) or is out of bounds
     protected final Object[] sectionCache;
@@ -190,7 +187,6 @@ public abstract class StarLightEngine {
         this.chunkCache[chunkX + 5*chunkZ + this.chunkIndexOffset] = chunk;
     }
 
-    /** The non-empty section at these section coordinates, or null (missing, empty or outside the cache). */
     protected final Object getChunkSection(final int chunkX, final int chunkY, final int chunkZ) {
         return this.sectionCache[chunkX + 5*chunkZ + (5 * 5) * chunkY + this.chunkSectionIndexOffset];
     }
@@ -262,8 +258,6 @@ public abstract class StarLightEngine {
             Arrays.fill(this.notifyUpdateCache, false);
         }
     }
-
-    // ── Block properties (air where the section is null) ──
 
     protected final int getOpacity(final int worldX, final int worldY, final int worldZ) {
         final Object section = this.sectionCache[(worldX >> 4) + 5 * (worldZ >> 4) + (5 * 5) * (worldY >> 4) + this.chunkSectionIndexOffset];
@@ -358,7 +352,6 @@ public abstract class StarLightEngine {
         return this.isClientSide || chunk.starlight$isLightReady();
     }
 
-    /** Positions are world coordinates packed as x, y, z triples. */
     public final void blocksChangedInChunk(final int chunkX, final int chunkZ, final int[] positions, final int positionCount,
                                            final Boolean[] changedSections) {
         this.setupCaches(chunkX * 16 + 7, 128, chunkZ * 16 + 7, true, true);
@@ -388,7 +381,8 @@ public abstract class StarLightEngine {
 
     protected abstract void checkBlock(final int worldX, final int worldY, final int worldZ);
 
-    // if ret > expect, then the real value is at least ret (early returns if ret > expect, rather than calculating actual)
+    // if ret > expect, then the real value is at least ret (early returns if ret > expect, rather
+    // than calculating actual)
     // if ret == expect, then expect is the correct light value for pos
     // if ret < expect, then ret is the real light value
     protected abstract int calculateLightValue(final int worldX, final int worldY, final int worldZ, final int expect);
@@ -476,7 +470,8 @@ public abstract class StarLightEngine {
                     final int neighbourLevel = neighbourNibble.getUpdating(neighbourIndex);
 
                     // the checks are delayed because the checkBlock method clobbers light values - which then
-                    // affect later calculate light value operations. While they don't affect it in a behaviourly significant
+                    // affect later calculate light value operations. While they don't affect it in
+                    // a behaviourly significant
                     // way, they do have a negative performance impact due to simply queueing more values
 
                     if (this.calculateLightValue(currX, currY, currZ, currentLevel) != currentLevel) {
@@ -621,7 +616,6 @@ public abstract class StarLightEngine {
         }
     }
 
-    /** Emptiness of each block section of a chunk (index = sectionY). */
     public final Boolean[] getEmptySectionsForChunk(final LightChunk chunk) {
         final Boolean[] ret = new Boolean[LightWorld.TOTAL_SECTIONS];
 
@@ -678,7 +672,8 @@ public abstract class StarLightEngine {
     // subclasses should not initialise caches, as this will always be done by the super call
     // subclasses should not invoke updateVisible, as this will always be done by the super call
     // subclasses are guaranteed that this is always called before a changed block set
-    // newChunk specifies whether the changes describe a "first load" of a chunk or changes to existing, already loaded chunks
+    // newChunk specifies whether the changes describe a "first load" of a chunk or changes to
+    // existing, already loaded chunks
     // rets non-null when the emptiness map changed and needs to be updated
     protected final boolean[] handleEmptySectionChanges(final LightChunk chunk, final Boolean[] emptinessChanges, final boolean unlit) {
         final int chunkX = chunk.starlight$chunkX();
@@ -731,7 +726,8 @@ public abstract class StarLightEngine {
         }
 
         // check for de-init and lazy-init
-        // lazy init is when chunks are being lit, so at the time they weren't loaded when their neighbours were running
+        // lazy init is when chunks are being lit, so at the time they weren't loaded when their
+        // neighbours were running
         // init checks.
         for (int dz = -1; dz <= 1; ++dz) {
             for (int dx = -1; dx <= 1; ++dx) {
@@ -778,7 +774,8 @@ public abstract class StarLightEngine {
 
                     if (allEmpty & neighboursLoaded) {
                         // can only de-init when neighbours are loaded
-                        // de-init is fine to delay, as de-init is just an optimisation - it's not required for lighting
+                        // de-init is fine to delay, as de-init is just an optimisation - it's not
+                        // required for lighting
                         // to be correct
 
                         // all were empty, so de-init
@@ -795,7 +792,7 @@ public abstract class StarLightEngine {
         return ret;
     }
 
-    /** Check only the sides in {@code directions} (bit i = +x, -x, +z, -z); nothing for 0. */
+    /** Only the sides in directions (bit i = +x, -x, +z, -z) */
     public final void checkChunkEdges(final int chunkX, final int chunkZ, final int directions) {
         if (directions == 0) {
             return;
@@ -840,15 +837,14 @@ public abstract class StarLightEngine {
     // subclasses should not invoke updateVisible, as this will always be done by the super call
     // needsEdgeChecks applies when possibly loading vanilla data, which means we need to validate the current
     // chunks light values with respect to neighbours
-    // subclasses should note that the emptiness changes are propagated BEFORE this is called, so this function
+    // subclasses should note that the emptiness changes are propagated BEFORE this is called, so
+    // this function
     // does not need to detect empty chunks itself (and it should do no handling for them either!)
     protected abstract void lightChunk(final LightChunk chunk, final boolean needsEdgeChecks);
 
     /**
-     * Light a chunk from scratch. {@code fresh}: a newly generated chunk with no earlier light
-     * anywhere (neighbours were lit without it, and it can only add light to them), so pulling
-     * the neighbours' edge light in suffices; otherwise (relit vanilla/foreign data, client chunks
-     * re-sent by a server) the neighbours' edges are fully checked, which costs a lot more.
+     * fresh: a newly generated chunk can only add light to its neighbours, so pulling their edge
+     * light is enough; otherwise the full edge check runs
      */
     public final void light(final LightChunk chunk, final Boolean[] emptySections, final boolean fresh) {
         final int chunkX = chunk.starlight$chunkX();
@@ -880,8 +876,8 @@ public abstract class StarLightEngine {
     }
 
     /**
-     * Relight {@code chunks} (keys: {@code z << 32 | x}, best ordered by a BFS from the centre). Each
-     * must be loaded, and stay loaded until this returns.
+     * Keys z << 32
+     * x, best in BFS order from the centre; all must stay loaded until this returns
      */
     public final void relightChunks(final long[] chunks, final LongSet chunkSet,
                                     final LongConsumer chunkLightCallback, final IntConsumer onComplete) {
@@ -1011,7 +1007,8 @@ public abstract class StarLightEngine {
     // next 24 bits: unused
     // last 2 bits: state flags
     // state flags:
-    // whether the increase propagator needs to write the propagated level to the position, used to avoid cascading light
+    // whether the increase propagator needs to write the propagated level to the position, used to
+    // avoid cascading light
     // updates for block sources
     protected static final long FLAG_WRITE_LEVEL = Long.MIN_VALUE >>> 2;
     // whether the propagation needs to check if its current level is equal to the expected level

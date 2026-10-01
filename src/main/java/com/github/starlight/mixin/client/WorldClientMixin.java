@@ -5,7 +5,6 @@ import net.minecraft.client.multiplayer.WorldClient;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
 
-/** The client world's Starlight state (phase 3: the client lights its own chunks). */
 @Mixin(WorldClient.class)
 public abstract class WorldClientMixin {
 

@@ -8,9 +8,8 @@ import org.spongepowered.asm.mixin.extensibility.IMixinConfigPlugin;
 import org.spongepowered.asm.mixin.extensibility.IMixinInfo;
 
 /**
- * Starlight replaces the lighting engine as a whole: with another lighting engine (or Cubic
- * Chunks, whose world layout it doesn't support) present, none of its mixins apply, and the
- * reason is logged, instead of two engines half-applying.
+ * Starlight replaces the lighting engine as a whole: with another lighting engine (or Cubic Chunks)
+ * present, none of its mixins apply
  */
 public final class StarlightMixinPlugin implements IMixinConfigPlugin {
 

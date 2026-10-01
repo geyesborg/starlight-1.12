@@ -12,11 +12,7 @@ import static com.github.starlight.light.SyntheticWorld.*;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-/**
- * The ported engines against an exact light fixpoint on synthetic 1.12 worlds: initial lighting
- * chunk by chunk (edge checks between neighbours), relighting, and block edits that change
- * opacity, emission and section emptiness.
- */
+/** Ported engines against an exact light fixpoint on synthetic 1.12 worlds */
 class StarLightEngineTest {
 
     @Test
@@ -134,15 +130,14 @@ class StarLightEngineTest {
         randomTerrain(true);
     }
 
-    /** Lighting with full edge checks (chunks whose neighbours may hold older light) gives the same result. */
     @Test
     void randomTerrainWithEdgeChecks() {
         randomTerrain(false);
     }
 
     /**
-     * A chunk lit after its neighbours, whose blocks changed while it was out of the world: the
-     * neighbours still hold light from its old blocks, which only the full edge check corrects.
+     * The neighbours still hold light from the relit chunk's old blocks; only the full edge check
+     * corrects that
      */
     @Test
     void relitChunkCorrectsStaleNeighbourLight() {
@@ -267,7 +262,6 @@ class StarLightEngineTest {
         }
     }
 
-    /** Every position in every loaded chunk: block and sky light equal the exact fixpoint. */
     private static void assertMatchesReference(final SyntheticWorld w, final String what) {
         final SyntheticWorld.Area a = w.area();
         final byte[] block = w.referenceLight(a, false);

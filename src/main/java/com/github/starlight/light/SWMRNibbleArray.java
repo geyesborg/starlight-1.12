@@ -4,12 +4,12 @@
  */
 package com.github.starlight.light;
 
-import net.minecraft.world.chunk.NibbleArray;
 import java.lang.invoke.MethodHandles;
 import java.lang.invoke.VarHandle;
 import java.nio.ByteOrder;
 import java.util.ArrayDeque;
 import java.util.Arrays;
+import net.minecraft.world.chunk.NibbleArray;
 
 // SWMR -> Single Writer Multi Reader Nibble Array
 public final class SWMRNibbleArray {
@@ -42,8 +42,7 @@ public final class SWMRNibbleArray {
         return new byte[ARRAY_SIZE];
     }
 
-    // 1.12: one shared, never-written array for visible data that is all 15 and not bound to a
-    // vanilla array (sky light of air sections above the terrain). Writers copy it first.
+    // 1.12: one shared all-15 array for the sky light of air sections above the terrain; writers copy it first
     private static final byte[] FULL = new byte[ARRAY_SIZE];
     static {
         Arrays.fill(FULL, (byte)-1);
@@ -425,17 +424,14 @@ public final class SWMRNibbleArray {
     }
 
     // operation type: updating (owner thread)
-    /** Whether the last {@link #updateVisible()} changed light values (writes, or data dropped), not just the state. */
     public boolean lastUpdateChangedData() {
         return this.lastUpdateChangedData;
     }
 
     // operation type: updating (owner thread)
     /**
-     * 1.12: make {@code into} (a vanilla section's light array) hold this nibble's visible data
-     * from now on, instead of a separate copy: updates are still written to a working array and
-     * published into it by {@link #updateVisible()}. Without visible data it holds zeros; hidden
-     * data stays readable (Starlight reads it too). Returns whether {@code into}'s contents changed.
+     * 1.12: the vanilla section array holds the visible data instead of a copy; updates still go to
+     * a separate array and are published by updateVisible
      */
     public boolean bindVisibleStorage(final byte[] into) {
         synchronized (this) {
@@ -519,9 +515,8 @@ public final class SWMRNibbleArray {
         this.storageUpdating[i] = (byte)((this.storageUpdating[i] & (0xF0 >>> shift)) | (value << shift));
     }
 
-
     // operation type: visible
-    /** Exact copy of the visible state and data (no zero/hidden folding as in save states); null for a null nibble. */
+    /** Exact copy of the visible state and data (no folding as in save states) */
     public SaveState getVisibleState() {
         synchronized (this) {
             final int state = this.stateVisible;
@@ -533,15 +528,11 @@ public final class SWMRNibbleArray {
         }
     }
 
-    /**
-     * A nibble holding {@code data} (owned by the new nibble) in {@code state}; all-15 data shares
-     * the constant array (copied before any write), as updateVisible does.
-     */
+    /** All-15 data shares the constant array, copied before any write */
     public static SWMRNibbleArray of(final byte[] data, final int state) {
         return new SWMRNibbleArray(data != null && state == INIT_STATE_INIT && isAllFull(data) ? FULL : data, state);
     }
 
-    /** Diagnostics: storage arrays in use as [private, bound vanilla array, shared all-15]. */
     public int[] storageKinds() {
         synchronized (this) {
             final int[] r = new int[3];
@@ -553,7 +544,6 @@ public final class SWMRNibbleArray {
         }
     }
 
-    /** Diagnostics: pooled work arrays of the calling thread. */
     public static int poolSize() {
         return WORKING_BYTES_POOL.get().size();
     }

@@ -7,24 +7,26 @@ import com.github.starlight.light.SWMRNibbleArray;
 import it.unimi.dsi.fastutil.ints.IntArrayList;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.Random;
 import net.minecraft.block.state.IBlockState;
+import net.minecraft.init.Blocks;
 import net.minecraft.util.math.BlockPos;
+import net.minecraft.util.math.ChunkPos;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.gen.ChunkProviderServer;
 
 /**
- * Dev check ({@code -Dstarlight.verify=true}): every 200 ticks, a random lit chunk whose 5x5
- * neighbourhood is loaded and lit is compared, position by position, with exact light computed
- * from the real blocks over that area (light travels at most 15 blocks, so the 2-chunk margin
- * holds everything that can reach the centre chunk). Sky mismatches are split into positions
- * in sections with light data and in sections without (read by extrusion).
+ * Dev check (-Dstarlight.verify=true): every 200 ticks a random lit chunk is compared with exact
+ * light computed from the real blocks
  */
 public final class LightVerifier {
 
     public static final boolean ENABLED = Boolean.getBoolean("starlight.verify");
-    // -Dstarlight.verifyEdits=true: random block edits around the chunk first (light updates through World.setBlockState)
+    // -Dstarlight.verifyEdits=true: random block edits around the chunk first (light updates
+    // through World.setBlockState)
     private static final boolean EDITS = Boolean.getBoolean("starlight.verifyEdits");
 
     private static final int MIN_Y = LightWorld.MIN_LIGHT_SECTION << 4, MAX_Y = (LightWorld.MAX_LIGHT_SECTION << 4) | 15;
@@ -47,7 +49,7 @@ public final class LightVerifier {
         if (BURST > 0 && ticks == 400 && world.provider.getDimension() == 0) {
             light.propagateChanges();
             final List<Chunk> c = candidates(world, light);
-            java.util.Collections.shuffle(c, new java.util.Random(42));
+            Collections.shuffle(c, new Random(42));
             int bad = 0, n = 0;
             for (final Chunk chunk : c.subList(0, Math.min(BURST, c.size()))) {
                 bad += verify(world, light, chunk) ? 0 : 1;
@@ -76,10 +78,8 @@ public final class LightVerifier {
     }
 
     /**
-     * Chunks A = (cx, cz) and N = (cx + 1, cz) in a freshly generated area. One of them is saved
-     * and unloaded, light changes along the shared border in the other (glowstone placed, and
-     * opaque blocks removed, in the border column), then the unloaded one is loaded from disk
-     * with its saved light and both are verified: a skipped edge check would leave stale light.
+     * One of two neighbouring chunks is saved and unloaded, light changes along their border, then
+     * it is reloaded with its saved light: a skipped edge check would leave stale light
      */
     private static void staleEdgeTest(final WorldServer world, final WorldLight light, final int cx, final int cz, final boolean unloadNeighbour) {
         final ChunkProviderServer provider = (ChunkProviderServer)world.getChunkProvider();
@@ -94,15 +94,15 @@ public final class LightVerifier {
         // save + unload one chunk now (the provider unloads queued chunks in its tick)
         provider.queueUnload(unloaded);
         provider.tick();
-        final boolean gone = provider.loadedChunks.get(net.minecraft.util.math.ChunkPos.asLong(unloaded.x, unloaded.z)) == null;
+        final boolean gone = provider.loadedChunks.get(ChunkPos.asLong(unloaded.x, unloaded.z)) == null;
         // light changes in the edited chunk's border column facing the unloaded one
         final int bx = unloadNeighbour ? (cx << 4) | 15 : (cx + 1) << 4;
         int placed = 0;
         for (int z = cz << 4; z < (cz << 4) + 16; z += 3) {
             for (int y = 20; y < 120; y += 7) {
                 final BlockPos p = new BlockPos(bx, y, z);
-                world.setBlockState(p, (y / 7 + z) % 2 == 0 ? net.minecraft.init.Blocks.GLOWSTONE.getDefaultState()
-                        : net.minecraft.init.Blocks.AIR.getDefaultState(), 2 | 16); // 16: no observer updates (they would load the unloaded chunk)
+                world.setBlockState(p, (y / 7 + z) % 2 == 0 ? Blocks.GLOWSTONE.getDefaultState()
+                        : Blocks.AIR.getDefaultState(), 2 | 16); // 16: no observer updates (they would load the unloaded chunk)
                 ++placed;
             }
         }
@@ -117,7 +117,6 @@ public final class LightVerifier {
         verify(world, light, provider.getLoadedChunk(edited.x, edited.z));
     }
 
-    /** Lit chunks whose 5x5 neighbourhood is loaded and lit. */
     private static List<Chunk> candidates(final WorldServer world, final WorldLight light) {
         final List<Chunk> candidates = new ArrayList<>();
         outer:
@@ -135,7 +134,6 @@ public final class LightVerifier {
         return candidates;
     }
 
-    /** Verify one chunk; returns whether it was exact. */
     private static boolean verify(final WorldServer world, final WorldLight light, final Chunk center) {
         final long start = System.nanoTime();
         final int x0 = (center.x - 2) << 4, z0 = (center.z - 2) << 4;
@@ -192,10 +190,10 @@ public final class LightVerifier {
     }
 
     private static final IBlockState[] EDIT_STATES = {
-            net.minecraft.init.Blocks.AIR.getDefaultState(), net.minecraft.init.Blocks.STONE.getDefaultState(),
-            net.minecraft.init.Blocks.GLASS.getDefaultState(), net.minecraft.init.Blocks.GLOWSTONE.getDefaultState(),
-            net.minecraft.init.Blocks.TORCH.getDefaultState(), net.minecraft.init.Blocks.WATER.getDefaultState(),
-            net.minecraft.init.Blocks.LEAVES.getDefaultState(), net.minecraft.init.Blocks.ICE.getDefaultState(),
+            Blocks.AIR.getDefaultState(), Blocks.STONE.getDefaultState(),
+            Blocks.GLASS.getDefaultState(), Blocks.GLOWSTONE.getDefaultState(),
+            Blocks.TORCH.getDefaultState(), Blocks.WATER.getDefaultState(),
+            Blocks.LEAVES.getDefaultState(), Blocks.ICE.getDefaultState(),
     };
 
     /** 150 random block changes over the 3x3 chunks around {@code center}, y 30..130 (no neighbour updates, no drops). */

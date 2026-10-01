@@ -1,6 +1,8 @@
 package com.github.starlight.mixin;
 
+import com.github.starlight.light.LightChunk;
 import com.github.starlight.world.LightSave;
+import com.github.starlight.world.StarlightWorld;
 import com.github.starlight.world.WorldLight;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.world.World;
@@ -13,8 +15,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /**
- * Chunk saves carry current light (flush point) plus Starlight's light data; loads restore it
- * (may run on Forge's chunk IO thread: it only fills the not-yet-published chunk).
+ * Saves carry current light plus Starlight's data; loads may run on Forge's chunk IO thread (the
+ * chunk isn't published yet)
  */
 @Mixin(AnvilChunkLoader.class)
 public abstract class AnvilChunkLoaderMixin {
@@ -27,8 +29,8 @@ public abstract class AnvilChunkLoaderMixin {
     @Inject(method = "writeChunkToNBT", at = @At("RETURN"))
     private void starlight$writeLight(final Chunk chunk, final World world, final NBTTagCompound level, final CallbackInfo ci) {
         if (!world.isRemote) {
-            final WorldLight light = ((com.github.starlight.world.StarlightWorld)world).starlight$getLight();
-            if (light != null && ((com.github.starlight.light.LightChunk)chunk).starlight$isLightReady()) {
+            final WorldLight light = ((StarlightWorld)world).starlight$getLight();
+            if (light != null && ((LightChunk)chunk).starlight$isLightReady()) {
                 light.syncEdgeRecords(chunk); // saveChunk applied queued changes first: consistent now
             }
             LightSave.write(chunk, world.provider.hasSkyLight(), level);
