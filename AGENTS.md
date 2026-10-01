@@ -209,11 +209,25 @@ Cleanroom versioning needs at least one git commit.
 
 LightBench lives in `../lightbench` (engine-neutral; `lightbench.properties` in the game dir or
 `-Dlightbench.out/world/quit`; the Prism runner script backs up and restores the instance).
-Remaining join gap: chunks loaded with saved light spend ~80% of `loadSavedLight` in the full
-edge check against loaded neighbours. Skipping it safely needs proof that neither side changed
-since the other was saved; light-value fingerprints alone miss border opacity changes made
-while the neighbour was unloaded, so a scheme must also cover border blocks.
-## Compatibility to handle
+Edge versions (join): chunks loaded with saved light spent ~80% of `loadSavedLight` in the full
+edge check. Each chunk now has a random version per side, replaced whenever its light changes
+(`onLightUpdate` with `lastUpdateChangedData`, `setLightFor`), and records the neighbour's
+version it was last consistent with (`syncEdgeRecords`: after lighting, after loading, and at
+save after the flush). A side is checked on load only if a lit neighbour's version differs from
+the record, the neighbour's record of this chunk differs, or registering emptiness wrote light
+on that side (extrusion into data-less sky sections is approximate at borders). Versions and
+records are saved as int arrays (1.12's NBTTagLongArray has no getter); chunks saved without
+them are checked fully and re-saved once. Any light change that bypasses `onLightUpdate`
+breaks this: `SkyStarLightEngine.rewriteNibbleCacheForSkylight` published silently (Moonrise
+does too) and now notifies. Saved-light loads ~0.06 ms per chunk (was 0.15-0.18 ms); ~6-12% of
+sides checked after the first upgrade.
+Save snapshot: vanilla's writeChunkToNBT stores the section light arrays by reference and the
+IO thread writes later; light updates in between reached the disk with older blocks/tag (1-2 of
+150 chunks wrong after reload). `LightSave.write` now clones them at save time.
+Dev checks: `-Dstarlight.verifyBurst=N` (verify N random lit chunks once, 400 ticks in),
+`-Dstarlight.staleEdgeTest=true` (border changes while one side is unloaded, reload, verify;
+with edge checks forced off it fails with ~11k mismatches), `-Dstarlight.checkAllEdges=true`
+(full check on every load, the control).## Compatibility to handle
 
 Fluidlogged API (Alfheim has a hook), dynamic-lights mods (client light value),
 Cubic Chunks (incompatible: detect and refuse), other lighting engines (refuse).

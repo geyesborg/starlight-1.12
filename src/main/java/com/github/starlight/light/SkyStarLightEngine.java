@@ -126,7 +126,14 @@ public final class SkyStarLightEngine extends StarLightEngine {
             if (nibble != null && nibble.isNullNibbleUpdating()) {
                 // stop propagation in these areas
                 this.nibbleCache[index] = null;
-                nibble.updateVisible();
+                if (nibble.updateVisible()) {
+                    // 1.12: published like any update (readers now extrude from above): save, re-render,
+                    // edge versions. Moonrise publishes this silently.
+                    final int chunkX = (index % 5) - this.chunkOffsetX;
+                    final int chunkZ = ((index / 5) % 5) - this.chunkOffsetZ;
+                    final int chunkY = ((index / (5 * 5)) % (this.maxSection - this.minSection + 1 + 2 + 2)) - this.chunkOffsetY;
+                    this.world.onLightUpdate(true, chunkX, chunkY, chunkZ);
+                }
             }
         }
     }

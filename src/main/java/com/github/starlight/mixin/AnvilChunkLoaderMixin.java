@@ -27,6 +27,10 @@ public abstract class AnvilChunkLoaderMixin {
     @Inject(method = "writeChunkToNBT", at = @At("RETURN"))
     private void starlight$writeLight(final Chunk chunk, final World world, final NBTTagCompound level, final CallbackInfo ci) {
         if (!world.isRemote) {
+            final WorldLight light = ((com.github.starlight.world.StarlightWorld)world).starlight$getLight();
+            if (light != null && ((com.github.starlight.light.LightChunk)chunk).starlight$isLightReady()) {
+                light.syncEdgeRecords(chunk); // saveChunk applied queued changes first: consistent now
+            }
             LightSave.write(chunk, world.provider.hasSkyLight(), level);
         }
     }

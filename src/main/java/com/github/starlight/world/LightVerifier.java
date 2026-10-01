@@ -35,25 +35,35 @@ public final class LightVerifier {
 
     private LightVerifier() {}
 
+    // -Dstarlight.staleEdgeTest=true: once, 300 ticks in, change light at a chunk border while the
+    // chunk on the other side is unloaded, reload it from disk (saved light) and verify both
+    public static final boolean STALE_EDGE_TEST = Boolean.getBoolean("starlight.staleEdgeTest");
+
+    // -Dstarlight.verifyBurst=N: once, 400 ticks in, verify N random lit chunks (5x5 lit) at once
+    public static final int BURST = Integer.getInteger("starlight.verifyBurst", 0);
+
     public static void tick(final WorldServer world, final WorldLight light) {
-        if (++ticks % 200 != 0) {
+        ++ticks;
+        if (BURST > 0 && ticks == 400 && world.provider.getDimension() == 0) {
+            light.propagateChanges();
+            final List<Chunk> c = candidates(world, light);
+            java.util.Collections.shuffle(c, new java.util.Random(42));
+            int bad = 0, n = 0;
+            for (final Chunk chunk : c.subList(0, Math.min(BURST, c.size()))) {
+                bad += verify(world, light, chunk) ? 0 : 1;
+                ++n;
+            }
+            Starlight.LOGGER.info("[Starlight verify burst] {} of {} chunks with mismatches ({} candidates)", bad, n, c.size());
+        }
+        if (STALE_EDGE_TEST && ticks == 300 && world.provider.getDimension() == 0) {
+            staleEdgeTest(world, light, 6000, 6000, false);
+            staleEdgeTest(world, light, 6100, 6000, true);
+        }
+        if (!ENABLED || ticks % 200 != 0) {
             return;
         }
         light.propagateChanges();
-        final List<Chunk> candidates = new ArrayList<>();
-        final ChunkProviderServer provider = (ChunkProviderServer)world.getChunkProvider();
-        outer:
-        for (final Chunk c : provider.loadedChunks.values()) {
-            for (int dx = -2; dx <= 2; ++dx) {
-                for (int dz = -2; dz <= 2; ++dz) {
-                    final LightChunk n = light.getChunkForLighting(c.x + dx, c.z + dz);
-                    if (n == null || !n.starlight$isLightReady()) {
-                        continue outer;
-                    }
-                }
-            }
-            candidates.add(c);
-        }
+        final List<Chunk> candidates = candidates(world, light);
         if (candidates.isEmpty()) {
             return;
         }
@@ -65,7 +75,68 @@ public final class LightVerifier {
         verify(world, light, center);
     }
 
-    private static void verify(final WorldServer world, final WorldLight light, final Chunk center) {
+    /**
+     * Chunks A = (cx, cz) and N = (cx + 1, cz) in a freshly generated area. One of them is saved
+     * and unloaded, light changes along the shared border in the other (glowstone placed, and
+     * opaque blocks removed, in the border column), then the unloaded one is loaded from disk
+     * with its saved light and both are verified: a skipped edge check would leave stale light.
+     */
+    private static void staleEdgeTest(final WorldServer world, final WorldLight light, final int cx, final int cz, final boolean unloadNeighbour) {
+        final ChunkProviderServer provider = (ChunkProviderServer)world.getChunkProvider();
+        for (int dx = -3; dx <= 4; ++dx) {
+            for (int dz = -3; dz <= 3; ++dz) {
+                provider.provideChunk(cx + dx, cz + dz);
+            }
+        }
+        light.propagateChanges();
+        final Chunk a = provider.getLoadedChunk(cx, cz), n = provider.getLoadedChunk(cx + 1, cz);
+        final Chunk unloaded = unloadNeighbour ? n : a, edited = unloadNeighbour ? a : n;
+        // save + unload one chunk now (the provider unloads queued chunks in its tick)
+        provider.queueUnload(unloaded);
+        provider.tick();
+        final boolean gone = provider.loadedChunks.get(net.minecraft.util.math.ChunkPos.asLong(unloaded.x, unloaded.z)) == null;
+        // light changes in the edited chunk's border column facing the unloaded one
+        final int bx = unloadNeighbour ? (cx << 4) | 15 : (cx + 1) << 4;
+        int placed = 0;
+        for (int z = cz << 4; z < (cz << 4) + 16; z += 3) {
+            for (int y = 20; y < 120; y += 7) {
+                final BlockPos p = new BlockPos(bx, y, z);
+                world.setBlockState(p, (y / 7 + z) % 2 == 0 ? net.minecraft.init.Blocks.GLOWSTONE.getDefaultState()
+                        : net.minecraft.init.Blocks.AIR.getDefaultState(), 2 | 16); // 16: no observer updates (they would load the unloaded chunk)
+                ++placed;
+            }
+        }
+        light.propagateChanges();
+        // reload from disk: saved light, then (if detected) the edge check
+        final Chunk back = provider.provideChunk(unloaded.x, unloaded.z);
+        light.propagateChanges();
+        final boolean fromSave = ((WorldLight.StarlightChunkState)back).starlight$isLightFromSave();
+        Starlight.LOGGER.info("[Starlight stale-edge test] unloaded {} ({},{}) gone={} reloaded from saved light={}, {} border changes in {} ({},{})",
+                unloadNeighbour ? "N" : "A", unloaded.x, unloaded.z, gone, fromSave, placed, unloadNeighbour ? "A" : "N", edited.x, edited.z);
+        verify(world, light, back);
+        verify(world, light, provider.getLoadedChunk(edited.x, edited.z));
+    }
+
+    /** Lit chunks whose 5x5 neighbourhood is loaded and lit. */
+    private static List<Chunk> candidates(final WorldServer world, final WorldLight light) {
+        final List<Chunk> candidates = new ArrayList<>();
+        outer:
+        for (final Chunk c : ((ChunkProviderServer)world.getChunkProvider()).loadedChunks.values()) {
+            for (int dx = -2; dx <= 2; ++dx) {
+                for (int dz = -2; dz <= 2; ++dz) {
+                    final LightChunk n = light.getChunkForLighting(c.x + dx, c.z + dz);
+                    if (n == null || !n.starlight$isLightReady()) {
+                        continue outer;
+                    }
+                }
+            }
+            candidates.add(c);
+        }
+        return candidates;
+    }
+
+    /** Verify one chunk; returns whether it was exact. */
+    private static boolean verify(final WorldServer world, final WorldLight light, final Chunk center) {
         final long start = System.nanoTime();
         final int x0 = (center.x - 2) << 4, z0 = (center.z - 2) << 4;
         final byte[] opacity = new byte[SIZE * SIZE * HEIGHT];
@@ -117,6 +188,7 @@ public final class LightVerifier {
         Starlight.LOGGER.info("[Starlight verify] chunk {},{}: {} block / {} sky / {} sky-in-empty-sections mismatches ({} of {} chunks clean, {} ms){}",
                 center.x, center.z, blockBad, skyBad, skyBadNull, clean, checked,
                 String.format("%.1f", (System.nanoTime() - start) / 1e6), sample);
+        return blockBad == 0 && skyBad == 0 && skyBadNull == 0;
     }
 
     private static final IBlockState[] EDIT_STATES = {

@@ -396,13 +396,20 @@ public abstract class StarLightEngine {
     protected final int[] chunkCheckDelayedUpdatesCenter = new int[16 * 16];
     protected final int[] chunkCheckDelayedUpdatesNeighbour = new int[16 * 16];
 
+    // 1.12: sides checked by checkChunkEdge, bit i = ONLY_HORIZONTAL_DIRECTIONS[i] (+x, -x, +z, -z)
+    protected int edgeDirections = 0xF;
+
     protected void checkChunkEdge(final LightChunk chunk, final int chunkX, final int chunkY, final int chunkZ) {
         final SWMRNibbleArray currNibble = this.getNibbleFromCache(chunkX, chunkY, chunkZ);
         if (currNibble == null) {
             return;
         }
 
-        for (final AxisDirection direction : ONLY_HORIZONTAL_DIRECTIONS) {
+        for (int dirIndex = 0; dirIndex < ONLY_HORIZONTAL_DIRECTIONS.length; ++dirIndex) {
+            if ((this.edgeDirections & (1 << dirIndex)) == 0) {
+                continue;
+            }
+            final AxisDirection direction = ONLY_HORIZONTAL_DIRECTIONS[dirIndex];
             final int neighbourOffX = direction.x;
             final int neighbourOffZ = direction.z;
 
@@ -786,6 +793,19 @@ public abstract class StarLightEngine {
         }
 
         return ret;
+    }
+
+    /** Check only the sides in {@code directions} (bit i = +x, -x, +z, -z); nothing for 0. */
+    public final void checkChunkEdges(final int chunkX, final int chunkZ, final int directions) {
+        if (directions == 0) {
+            return;
+        }
+        this.edgeDirections = directions;
+        try {
+            this.checkChunkEdges(chunkX, chunkZ);
+        } finally {
+            this.edgeDirections = 0xF;
+        }
     }
 
     public final void checkChunkEdges(final int chunkX, final int chunkZ) {

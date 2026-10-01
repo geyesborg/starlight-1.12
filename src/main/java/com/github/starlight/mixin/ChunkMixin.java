@@ -61,6 +61,13 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Override public void starlight$setLightReady(final boolean ready) { this.starlight$lightReady = ready; }
     @Unique private boolean starlight$savedLight;
     @Unique private boolean starlight$lightFromSave;
+    @Unique private final long[] starlight$edgeVersions = {WorldLight.newEdgeVersion(), WorldLight.newEdgeVersion(), WorldLight.newEdgeVersion(), WorldLight.newEdgeVersion()};
+    @Unique private final long[] starlight$edgeRecords = new long[4];
+    @Override public long[] starlight$edgeVersions() { return this.starlight$edgeVersions; }
+    @Override public long[] starlight$edgeRecords() { return this.starlight$edgeRecords; }
+    @Unique private boolean starlight$edgeUpgrade;
+    @Override public boolean starlight$needsEdgeUpgrade() { return this.starlight$edgeUpgrade; }
+    @Override public void starlight$setEdgeUpgrade(final boolean upgrade) { this.starlight$edgeUpgrade = upgrade; }
     @Override public boolean starlight$isLightFromSave() { return this.starlight$lightFromSave; }
     @Override public void starlight$setLightFromSave(final boolean fromSave) { this.starlight$lightFromSave = fromSave; }
     @Override public void starlight$setSavedLight(final boolean saved) { this.starlight$savedLight = saved; }
@@ -288,6 +295,9 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
         if (nibble != null && !nibble.isNullNibbleUpdating()) {
             nibble.set(pos.getX() & 15, pos.getY() & 15, pos.getZ() & 15, value);
             nibble.updateVisible();
+            if (!this.world.isRemote) {
+                WorldLight.bumpEdges((Chunk)(Object)this); // light changed outside the engine
+            }
         }
         this.starlight$light().mirrorSection((Chunk)(Object)this, pos.getY() >> 4); // setLightFor may have created the section
     }

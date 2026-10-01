@@ -124,6 +124,8 @@ public final class WorldLight implements LightWorld {
             return;
         }
         final long start = System.nanoTime();
+        bumpEdges(chunk);
+        java.util.Arrays.fill(((StarlightChunkState)chunk).starlight$edgeRecords(), 0L);
         final Boolean[] empty = this.blockEngine.getEmptySectionsForChunk(lc);
         if (this.skyEngine != null) {
             this.skyEngine.light(lc, empty.clone(), fresh);
@@ -133,6 +135,7 @@ public final class WorldLight implements LightWorld {
         ((StarlightChunkState)chunk).starlight$setLightReady(true);
         this.mirrorChunk(chunk, true);
         if (!this.client) {
+            this.syncEdgeRecords(chunk);
             LightStats.chunkLit(fresh, System.nanoTime() - start);
         }
     }
@@ -145,20 +148,31 @@ public final class WorldLight implements LightWorld {
     public void loadSavedLight(final Chunk chunk) {
         final LightChunk lc = (LightChunk)chunk;
         final long start = System.nanoTime();
+        int edges = this.edgesToCheck(chunk); // before anything here changes light
+        final long[] before = this.sideVersions(chunk);
         final Boolean[] empty = this.blockEngine.getEmptySectionsForChunk(lc);
         if (this.skyEngine != null) {
             this.skyEngine.forceHandleEmptySectionChanges(lc, empty.clone());
         }
         this.blockEngine.forceHandleEmptySectionChanges(lc, empty.clone());
+        // registering emptiness can write light (sky data extruded into sections that had none, here
+        // or in a neighbour): that is approximate at borders, so those sides are checked regardless
+        edges |= this.changedSides(chunk, before);
         ((StarlightChunkState)chunk).starlight$setKnownEmptiness(empty);
         ((StarlightChunkState)chunk).starlight$setLightFromSave(true);
         ((StarlightChunkState)chunk).starlight$setLightReady(true);
-        if (this.skyEngine != null) {
-            this.skyEngine.checkChunkEdges(chunk.x, chunk.z);
+        if (CHECK_ALL_EDGES || edges != 0) {
+            final int mask = CHECK_ALL_EDGES ? 0xF : edges;
+            if (this.skyEngine != null) {
+                this.skyEngine.checkChunkEdges(chunk.x, chunk.z, mask);
+            }
+            this.blockEngine.checkChunkEdges(chunk.x, chunk.z, mask);
         }
-        this.blockEngine.checkChunkEdges(chunk.x, chunk.z);
-        this.mirrorChunk(chunk, false);
-        LightStats.chunkLoaded(System.nanoTime() - start);
+        // saved without edge versions (older format): save once with them, so later loads can skip checks
+        this.mirrorChunk(chunk, ((StarlightChunkState)chunk).starlight$needsEdgeUpgrade());
+        ((StarlightChunkState)chunk).starlight$setEdgeUpgrade(false);
+        this.syncEdgeRecords(chunk);
+        LightStats.chunkLoaded(System.nanoTime() - start, Integer.bitCount(edges));
     }
 
     /**
@@ -178,8 +192,8 @@ public final class WorldLight implements LightWorld {
         ((StarlightChunkState)chunk).starlight$setKnownEmptiness(empty);
         ((StarlightChunkState)chunk).starlight$setLightReady(true);
         this.mirrorChunk(chunk, false);
-        ++this.imported;
-    }
+        ++this.imported;    }
+
 
     private static SWMRNibbleArray[] copyVisible(final SWMRNibbleArray[] from) {
         final SWMRNibbleArray[] ret = new SWMRNibbleArray[from.length];
@@ -195,6 +209,91 @@ public final class WorldLight implements LightWorld {
     /** Client chunks whose light was copied from the integrated server (diagnostics). */
     public long importedChunks() {
         return this.imported;
+    }
+
+    // ── Edge versions: skip the border check on load where neither side changed ──
+
+    // dev: -Dstarlight.checkAllEdges=true restores the full border check on every load (A/B)
+    private static final boolean CHECK_ALL_EDGES = Boolean.getBoolean("starlight.checkAllEdges");
+
+    private static final int[][] SIDES = {{1, 0}, {-1, 0}, {0, 1}, {0, -1}}; // +x, -x, +z, -z (opposite = i ^ 1)
+
+    public static long newEdgeVersion() {
+        return java.util.concurrent.ThreadLocalRandom.current().nextLong() | 1L; // never 0 (= unknown)
+    }
+
+    /** The chunk's light changed: every side gets a new version (neighbours' records no longer match). */
+    public static void bumpEdges(final Chunk chunk) {
+        final long[] v = ((StarlightChunkState)chunk).starlight$edgeVersions();
+        for (int i = 0; i < 4; ++i) {
+            v[i] = newEdgeVersion();
+        }
+    }
+
+    private StarlightChunkState readyNeighbour(final Chunk chunk, final int side) {
+        final LightChunk n = this.getChunkForLighting(chunk.x + SIDES[side][0], chunk.z + SIDES[side][1]);
+        return n != null && n.starlight$isLightReady() ? (StarlightChunkState)n : null;
+    }
+
+    /**
+     * The chunk and its lit neighbours are consistent now (queued changes applied): record each
+     * other's versions. Called after lighting or loading a chunk and before saving it.
+     */
+    public void syncEdgeRecords(final Chunk chunk) {
+        final StarlightChunkState self = (StarlightChunkState)chunk;
+        for (int side = 0; side < 4; ++side) {
+            final StarlightChunkState n = this.readyNeighbour(chunk, side);
+            if (n != null) {
+                self.starlight$edgeRecords()[side] = n.starlight$edgeVersions()[side ^ 1];
+                n.starlight$edgeRecords()[side ^ 1] = self.starlight$edgeVersions()[side];
+            }
+        }
+    }
+
+    /**
+     * Sides of a chunk loaded with saved light that need the border check: a lit neighbour whose
+     * version differs from the one this chunk recorded, or that recorded a different version of
+     * this chunk. Equal on both sides means neither changed since they were last consistent.
+     */
+    private int edgesToCheck(final Chunk chunk) {
+        final StarlightChunkState self = (StarlightChunkState)chunk;
+        int mask = 0;
+        for (int side = 0; side < 4; ++side) {
+            final StarlightChunkState n = this.readyNeighbour(chunk, side);
+            if (n == null) {
+                continue; // nothing to check against; that neighbour checks when it loads
+            }
+            final long rec = self.starlight$edgeRecords()[side];
+            if (rec == 0 || rec != n.starlight$edgeVersions()[side ^ 1]
+                    || n.starlight$edgeRecords()[side ^ 1] != self.starlight$edgeVersions()[side]) {
+                mask |= 1 << side;
+            }
+        }
+        return mask;
+    }
+
+    /** This chunk's version and each lit neighbour's version facing it (0 where there is none). */
+    private long[] sideVersions(final Chunk chunk) {
+        final long[] v = new long[8];
+        final long[] own = ((StarlightChunkState)chunk).starlight$edgeVersions();
+        for (int side = 0; side < 4; ++side) {
+            v[side] = own[side];
+            final StarlightChunkState n = this.readyNeighbour(chunk, side);
+            v[4 + side] = n == null ? 0 : n.starlight$edgeVersions()[side ^ 1];
+        }
+        return v;
+    }
+
+    /** Sides whose light changed (this chunk's or the neighbour's version) since {@code before}. */
+    private int changedSides(final Chunk chunk, final long[] before) {
+        final long[] after = this.sideVersions(chunk);
+        int mask = 0;
+        for (int side = 0; side < 4; ++side) {
+            if (after[4 + side] != 0 && (after[side] != before[side] || after[4 + side] != before[4 + side])) {
+                mask |= 1 << side;
+            }
+        }
+        return mask;
     }
 
     /**
@@ -367,23 +466,30 @@ public final class WorldLight implements LightWorld {
 
     @Override
     public void onLightUpdate(final boolean sky, final int chunkX, final int chunkY, final int chunkZ) {
-        if (chunkY < MIN_SECTION || chunkY > MAX_SECTION) {
+        if (chunkY < MIN_LIGHT_SECTION || chunkY > MAX_LIGHT_SECTION) {
             return;
         }
         final Chunk chunk = (Chunk)this.getChunkForLighting(chunkX, chunkZ);
         if (chunk == null) {
             return;
         }
-        // The section's vanilla arrays are bound to Starlight's visible data, so they already hold
-        // the update; bindSection only acts when they aren't bound yet (or were replaced).
-        this.bindSection(chunk, chunkY);
+        final boolean blockSection = chunkY >= MIN_SECTION && chunkY <= MAX_SECTION;
+        if (blockSection) {
+            // The section's vanilla arrays are bound to Starlight's visible data, so they already hold
+            // the update; bindSection only acts when they aren't bound yet (or were replaced).
+            this.bindSection(chunk, chunkY);
+        }
         if (this.client) {
-            this.markForRender(chunkX, chunkY, chunkZ);
+            if (blockSection) {
+                this.markForRender(chunkX, chunkY, chunkZ);
+            }
         } else {
+            // sections -1 and 16 too: their light is saved (explicitly) and reaches the borders
             // save only real light changes: state-only changes are recomputed on every load
             final SWMRNibbleArray nibble = (sky ? ((LightChunk)chunk).starlight$getSkyNibbles() : ((LightChunk)chunk).starlight$getBlockNibbles())[chunkY + 1];
             if (nibble != null && nibble.lastUpdateChangedData()) {
                 chunk.markDirty();
+                bumpEdges(chunk);
             }
         }
     }
@@ -423,6 +529,19 @@ public final class WorldLight implements LightWorld {
     /** Starlight state for chunks the port keeps on 1.12 Chunk (mixin). */
     public interface StarlightChunkState {
         void starlight$setLightReady(boolean ready);
+
+        /**
+         * Per side (+x, -x, +z, -z): a random version, replaced whenever the chunk's light changes,
+         * and the neighbour's version this chunk was last consistent with (0 = unknown).
+         */
+        long[] starlight$edgeVersions();
+
+        long[] starlight$edgeRecords();
+
+        /** Loaded from a save without edge versions: save it once with them. */
+        boolean starlight$needsEdgeUpgrade();
+
+        void starlight$setEdgeUpgrade(boolean upgrade);
 
         /** Whether the chunk's light came from its save (computed in an earlier session, possibly with neighbours' older blocks). */
         boolean starlight$isLightFromSave();

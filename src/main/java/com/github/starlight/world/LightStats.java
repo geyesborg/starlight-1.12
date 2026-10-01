@@ -19,7 +19,11 @@ public final class LightStats {
         add(fresh ? 0 : 1, elapsedNanos);
     }
 
-    static void chunkLoaded(final long elapsedNanos) {
+    private static long edgeSides, edgeSidesChecked;
+
+    static void chunkLoaded(final long elapsedNanos, final int sidesChecked) {
+        edgeSidesChecked += sidesChecked;
+        edgeSides += 4;
         add(2, elapsedNanos);
     }
 
@@ -32,6 +36,7 @@ public final class LightStats {
                 sb.append(String.format(" %d %s (%.2f ms avg)%s", COUNT[i], NAMES[i],
                         COUNT[i] == 0 ? 0.0 : NANOS[i] / 1e6 / COUNT[i], i < 2 ? "," : ""));
             }
+            sb.append(String.format("; saved-light loads checked %d of %d sides", edgeSidesChecked, edgeSides));
             Starlight.LOGGER.info(sb.toString());
         }
     }

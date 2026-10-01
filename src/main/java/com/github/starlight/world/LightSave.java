@@ -34,6 +34,18 @@ public final class LightSave {
             return; // not lit yet: relit when it loads
         }
         try {
+            // Vanilla stores the section light arrays by reference and the file is written later on
+            // the IO thread: light updates in between would end up on disk with older blocks and
+            // tag. Snapshot them now, while they are consistent (queued changes were just applied).
+            final net.minecraft.nbt.NBTTagList sections = level.getTagList("Sections", 10);
+            for (int i = 0; i < sections.tagCount(); ++i) {
+                final NBTTagCompound section = sections.getCompoundTagAt(i);
+                for (final String key : new String[] {"BlockLight", "SkyLight"}) {
+                    if (section.hasKey(key, 7)) {
+                        section.setByteArray(key, section.getByteArray(key).clone());
+                    }
+                }
+            }
             final NBTTagCompound tag = new NBTTagCompound();
             final int[] states = new int[SECTIONS * 2];
             writeLayer(chunk, lc.starlight$getBlockNibbles(), false, states, 0, tag);
@@ -41,6 +53,10 @@ public final class LightSave {
                 writeLayer(chunk, lc.starlight$getSkyNibbles(), true, states, SECTIONS, tag);
             }
             tag.setIntArray("States", states);
+            // edge versions (see WorldLight.edgesToCheck); the caller made the chunk consistent
+            final WorldLight.StarlightChunkState state = (WorldLight.StarlightChunkState)chunk;
+            tag.setIntArray("EdgeVersions", toInts(state.starlight$edgeVersions()));
+            tag.setIntArray("EdgeRecords", toInts(state.starlight$edgeRecords()));
             tag.setBoolean("Sky", hasSky);
             tag.setInteger("Version", VERSION); // last: only complete data is marked valid
             level.setTag(TAG, tag);
@@ -83,6 +99,15 @@ public final class LightSave {
             final LightChunk lc = (LightChunk)chunk;
             lc.starlight$setBlockNibbles(block);
             lc.starlight$setSkyNibbles(sky);
+            final WorldLight.StarlightChunkState state = (WorldLight.StarlightChunkState)chunk;
+            final long[] versions = longArray(tag, "EdgeVersions"), records = longArray(tag, "EdgeRecords");
+            final boolean hasEdges = versions != null && records != null && versions[0] != 0 && versions[1] != 0 && versions[2] != 0 && versions[3] != 0;
+            state.starlight$setEdgeUpgrade(!hasEdges);
+            if (hasEdges) {
+                // else: fresh versions, unknown records (every side checked)
+                System.arraycopy(versions, 0, state.starlight$edgeVersions(), 0, 4);
+                System.arraycopy(records, 0, state.starlight$edgeRecords(), 0, 4);
+            }
             return true;
         } catch (final Throwable t) {
             Starlight.LOGGER.warn("[Starlight] could not read saved light of chunk {},{}; it will be relit", chunk.x, chunk.z, t);
@@ -115,6 +140,29 @@ public final class LightSave {
             }
         }
         return nibbles;
+    }
+
+    // 1.12's NBTTagLongArray has no getter: 4 longs as 8 ints (high, low)
+    private static int[] toInts(final long[] v) {
+        final int[] r = new int[8];
+        for (int i = 0; i < 4; ++i) {
+            r[2 * i] = (int)(v[i] >>> 32);
+            r[2 * i + 1] = (int)v[i];
+        }
+        return r;
+    }
+
+    /** The 4 longs stored under key; versions must be non-zero (0 marks unknown), records may be 0. */
+    private static long[] longArray(final NBTTagCompound tag, final String key) {
+        final int[] a = tag.getIntArray(key);
+        if (a.length != 8) {
+            return null;
+        }
+        final long[] r = new long[4];
+        for (int i = 0; i < 4; ++i) {
+            r[i] = ((long)a[2 * i] << 32) | (a[2 * i + 1] & 0xFFFFFFFFL);
+        }
+        return r;
     }
 
     private static ExtendedBlockStorage vanillaSection(final Chunk chunk, final int sectionY) {
