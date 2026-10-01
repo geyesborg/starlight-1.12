@@ -197,6 +197,22 @@ Cleanroom versioning needs at least one git commit.
   saved world: 4500 lit as new at ~0.34 ms (was ~0.5-0.6 ms with edge checks); tick totals on
   this machine vary too much (idle tick 4.5-8.6 ms between runs) to show per-change gains -
   compare LightStats averages.
+## Production comparison (LightBench, user's Prism instance, 2 runs each, dev.11)
+
+| server time | vanilla | Alfheim | Starlight |
+|---|---|---|---|
+| 6000 light edits | 6.6-7.8 s | 0.63-0.67 s | 0.40-0.45 s |
+| client worst frame in edits | 1.8-2.0 s | 134-164 ms | 49-52 ms |
+| 529 new chunks (incl. deferred) | 3.46 s | 3.06-3.12 s | 3.07-3.19 s (dev.9: 3.66) |
+| first 30 s after join | 7.0 s | 7.13-7.23 s | 7.55-7.58 s (dev.9: 7.62) |
+| exact-light checks | errors | exact | exact |
+
+LightBench lives in `../lightbench` (engine-neutral; `lightbench.properties` in the game dir or
+`-Dlightbench.out/world/quit`; the Prism runner script backs up and restores the instance).
+Remaining join gap: chunks loaded with saved light spend ~80% of `loadSavedLight` in the full
+edge check against loaded neighbours. Skipping it safely needs proof that neither side changed
+since the other was saved; light-value fingerprints alone miss border opacity changes made
+while the neighbour was unloaded, so a scheme must also cover border blocks.
 ## Compatibility to handle
 
 Fluidlogged API (Alfheim has a hook), dynamic-lights mods (client light value),
