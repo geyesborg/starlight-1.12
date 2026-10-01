@@ -171,6 +171,27 @@ Cleanroom versioning needs at least one git commit.
   column sees the sky, block 0): their vanilla arrays are zeros since the vanilla sky fill is
   skipped. JFR attributing server samples to `postLightUpdate`'s client-only loop is a
   line-attribution artifact of inlining (engines are created with the right side).
+## Generation and join speed
+
+- Source scan: `BlockStarLightEngine.getSources` read all 4096 blocks of every non-empty
+  section (22% of chunk lighting). `WorldLight.mayHaveEmission` -> `Emitters` now checks the
+  section palette first (accessor mixins on BlockStateContainer / BlockStatePaletteLinear /
+  BlockStatePaletteHashMap): a state may emit if `getLightValue() > 0` or its block overrides
+  Forge's position-aware `getLightValue`; the registry palette (>256 states) is scanned.
+- Lit as new: `StarLightEngine.light(chunk, empty, fresh)`. A just-generated chunk, or a chunk
+  saved without Starlight light with no loaded neighbour holding light from its save
+  (`WorldLight.canLightAsNew`, `StarlightChunkState.isLightFromSave`), pulls neighbour edge
+  light instead of the full edge check (which re-evaluates every edge cell both sides).
+  Neighbours lit in this session can't hold stale light from it: a chunk can't change while
+  unloaded, and a lit chunk is saved with its light. `relitChunkCorrectsStaleNeighbourLight`
+  shows why the full check stays for the other cases (fails with the fast path).
+- Saved-light loads no longer mark chunks modified (`mirrorChunk(chunk, false)`): every chunk
+  loaded with saved light was re-saved at the next autosave/quit. Updates that change light
+  still mark it (onLightUpdate).
+- `LightStats` logs chunks lit as new / with edge checks / loaded, every 500. Dev run, vanilla-
+  saved world: 4500 lit as new at ~0.34 ms (was ~0.5-0.6 ms with edge checks); tick totals on
+  this machine vary too much (idle tick 4.5-8.6 ms between runs) to show per-change gains -
+  compare LightStats averages.
 ## Compatibility to handle
 
 Fluidlogged API (Alfheim has a hook), dynamic-lights mods (client light value),

@@ -119,7 +119,7 @@ class StarLightEngineTest {
         }
         w.setBlockRaw(8, 64, 8, TORCH);
         for (final SyntheticWorld.Chunk c : w.chunks.values()) {
-            w.lightChunk(c);
+            w.lightChunk(c, true);
         }
         assertEquals(14, w.getBlockLight(8, 64, 8));
         assertEquals(13, w.getBlockLight(9, 64, 8));
@@ -131,6 +131,52 @@ class StarLightEngineTest {
 
     @Test
     void randomTerrainLightingEditsAndRelight() {
+        randomTerrain(true);
+    }
+
+    /** Lighting with full edge checks (chunks whose neighbours may hold older light) gives the same result. */
+    @Test
+    void randomTerrainWithEdgeChecks() {
+        randomTerrain(false);
+    }
+
+    /**
+     * A chunk lit after its neighbours, whose blocks changed while it was out of the world: the
+     * neighbours still hold light from its old blocks, which only the full edge check corrects.
+     */
+    @Test
+    void relitChunkCorrectsStaleNeighbourLight() {
+        final SyntheticWorld w = new SyntheticWorld();
+        for (int cx = -1; cx <= 1; ++cx) {
+            for (int cz = -1; cz <= 1; ++cz) {
+                w.addChunk(cx, cz);
+            }
+        }
+        for (int x = -16; x < 32; ++x) {
+            for (int z = -16; z < 32; ++z) {
+                for (int y = 0; y < 64; ++y) {
+                    w.setBlockRaw(x, y, z, STONE);
+                }
+            }
+        }
+        w.setBlockRaw(15, 64, 8, GLOWSTONE); // centre chunk, at its +x edge
+        for (final SyntheticWorld.Chunk c : w.chunks.values()) {
+            w.lightChunk(c, true);
+        }
+        assertEquals(14, w.getBlockLight(16, 64, 8), "neighbour lit by the source");
+        // the centre chunk "unloads", loses the source elsewhere, and is relit
+        final SyntheticWorld.Chunk centre = w.chunks.get(SyntheticWorld.key(0, 0));
+        w.setBlockRaw(15, 64, 8, AIR);
+        centre.lightReady = false;
+        centre.blockNibbles = StarLightEngine.getFilledEmptyLight();
+        centre.skyNibbles = StarLightEngine.getFilledEmptyLight();
+        centre.blockEmptiness = centre.skyEmptiness = null;
+        w.lightChunk(centre, false);
+        assertEquals(0, w.getBlockLight(16, 64, 8), "the stale light in the neighbour is removed");
+        assertMatchesReference(w, "relit chunk");
+    }
+
+    private static void randomTerrain(final boolean fresh) {
         final Random r = new Random(1234);
         final SyntheticWorld w = new SyntheticWorld();
         final int radius = 2;
@@ -145,7 +191,7 @@ class StarLightEngineTest {
         final List<SyntheticWorld.Chunk> order = new ArrayList<>(w.chunks.values());
         Collections.shuffle(order, r);
         for (final SyntheticWorld.Chunk c : order) {
-            w.lightChunk(c);
+            w.lightChunk(c, fresh);
         }
         assertMatchesReference(w, "initial light");
 

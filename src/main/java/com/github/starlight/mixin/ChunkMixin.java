@@ -60,6 +60,9 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     @Override public boolean starlight$isLightReady() { return this.starlight$lightReady; }
     @Override public void starlight$setLightReady(final boolean ready) { this.starlight$lightReady = ready; }
     @Unique private boolean starlight$savedLight;
+    @Unique private boolean starlight$lightFromSave;
+    @Override public boolean starlight$isLightFromSave() { return this.starlight$lightFromSave; }
+    @Override public void starlight$setLightFromSave(final boolean fromSave) { this.starlight$lightFromSave = fromSave; }
     @Override public void starlight$setSavedLight(final boolean saved) { this.starlight$savedLight = saved; }
     @Override public boolean starlight$hasSavedLight() { return this.starlight$savedLight; }
     @Override public SWMRNibbleArray[] starlight$getBlockNibbles() { return this.starlight$blockNibbles; }
@@ -169,7 +172,8 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
             this.starlight$savedLight = false;
             light.loadSavedLight((Chunk)(Object)this);
         } else if (this.isTerrainPopulated) {
-            light.lightChunk((Chunk)(Object)this);
+            // saved without Starlight light: full edge checks only if a neighbour's saved light may disagree
+            light.lightChunk((Chunk)(Object)this, light.canLightAsNew((Chunk)(Object)this));
         }
     }
 
@@ -184,7 +188,7 @@ public abstract class ChunkMixin implements LightChunk, WorldLight.StarlightChun
     private void starlight$lightAfterPopulate(final IChunkGenerator generator, final CallbackInfo ci) {
         final WorldLight light = this.starlight$light();
         if (light != null && !this.world.isRemote && !this.starlight$wasPopulated) {
-            light.lightChunk((Chunk)(Object)this);
+            light.lightChunk((Chunk)(Object)this, true); // just generated
         }
     }
 

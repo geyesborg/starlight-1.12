@@ -824,7 +824,13 @@ public abstract class StarLightEngine {
     // does not need to detect empty chunks itself (and it should do no handling for them either!)
     protected abstract void lightChunk(final LightChunk chunk, final boolean needsEdgeChecks);
 
-    public final void light(final LightChunk chunk, final Boolean[] emptySections) {
+    /**
+     * Light a chunk from scratch. {@code fresh}: a newly generated chunk with no earlier light
+     * anywhere (neighbours were lit without it, and it can only add light to them), so pulling
+     * the neighbours' edge light in suffices; otherwise (relit vanilla/foreign data, client chunks
+     * re-sent by a server) the neighbours' edges are fully checked, which costs a lot more.
+     */
+    public final void light(final LightChunk chunk, final Boolean[] emptySections, final boolean fresh) {
         final int chunkX = chunk.starlight$chunkX();
         final int chunkZ = chunk.starlight$chunkZ();
         this.setupCaches(chunkX * 16 + 7, 128, chunkZ * 16 + 7, true, true);
@@ -841,7 +847,7 @@ public abstract class StarLightEngine {
             if (ret != null) {
                 this.setEmptinessMap(chunk, ret);
             }
-            this.lightChunk(chunk, true);
+            this.lightChunk(chunk, !fresh);
             this.setNibbles(chunk, nibbles);
             this.updateVisible();
         } finally {

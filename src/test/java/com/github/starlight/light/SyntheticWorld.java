@@ -121,11 +121,11 @@ final class SyntheticWorld implements LightWorld {
         this.pendingSections.clear();
     }
 
-    /** Light a newly loaded chunk with both engines (Starlight's lightChunk). */
-    void lightChunk(final Chunk c) {
+    /** Light a chunk with both engines (Starlight's lightChunk); fresh = just generated. */
+    void lightChunk(final Chunk c, final boolean fresh) {
         final Boolean[] empty = this.blockEngine.getEmptySectionsForChunk(c);
-        this.skyEngine.light(c, empty.clone());
-        this.blockEngine.light(c, empty.clone());
+        this.skyEngine.light(c, empty.clone(), fresh);
+        this.blockEngine.light(c, empty.clone(), fresh);
         c.lightReady = true;
     }
 

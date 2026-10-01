@@ -2,32 +2,37 @@ package com.github.starlight.world;
 
 import com.github.starlight.Starlight;
 
-/** Chunk lighting counters, logged every 1000 chunks lit (server thread). */
+/**
+ * Chunk lighting counters (server thread): chunks lit as new (generated, or relit with no
+ * neighbour holding saved light), lit with full edge checks, and loaded with saved light;
+ * logged every 500.
+ */
 public final class LightStats {
 
-    private static long chunks, nanos, loaded, loadNanos;
+    private static final long[] COUNT = new long[3], NANOS = new long[3];
+    private static final String[] NAMES = {"lit as new", "lit with edge checks", "loaded with saved light"};
+    private static long total;
 
     private LightStats() {}
 
-    static void chunkLit(final long elapsedNanos) {
-        ++chunks;
-        nanos += elapsedNanos;
-        if (chunks % 1000 == 0) {
-            log();
-        }
+    static void chunkLit(final boolean fresh, final long elapsedNanos) {
+        add(fresh ? 0 : 1, elapsedNanos);
     }
 
     static void chunkLoaded(final long elapsedNanos) {
-        ++loaded;
-        loadNanos += elapsedNanos;
-        if (loaded % 1000 == 0) {
-            log();
-        }
+        add(2, elapsedNanos);
     }
 
-    private static void log() {
-        Starlight.LOGGER.info("[Starlight] {} chunks lit ({} ms average), {} loaded with saved light ({} ms average)",
-                chunks, String.format("%.2f", chunks == 0 ? 0 : nanos / 1e6 / chunks),
-                loaded, String.format("%.2f", loaded == 0 ? 0 : loadNanos / 1e6 / loaded));
+    private static void add(final int kind, final long elapsedNanos) {
+        ++COUNT[kind];
+        NANOS[kind] += elapsedNanos;
+        if (++total % 500 == 0) {
+            final StringBuilder sb = new StringBuilder("[Starlight] chunks:");
+            for (int i = 0; i < 3; ++i) {
+                sb.append(String.format(" %d %s (%.2f ms avg)%s", COUNT[i], NAMES[i],
+                        COUNT[i] == 0 ? 0.0 : NANOS[i] / 1e6 / COUNT[i], i < 2 ? "," : ""));
+            }
+            Starlight.LOGGER.info(sb.toString());
+        }
     }
 }
