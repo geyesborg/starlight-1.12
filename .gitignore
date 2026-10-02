@@ -166,3 +166,5 @@ bin/
 
 # Temp files
 tmp_extract/
+# local agent notes, not published
+/AGENTS.md
