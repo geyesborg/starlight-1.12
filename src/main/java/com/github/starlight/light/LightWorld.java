@@ -28,11 +28,7 @@ public interface LightWorld {
     /** Whether a non-null section holds only air. */
     boolean isEmpty(Object section);
 
-    /**
-     * Light opacity (0..255) at localIndex (x
-     * z << 4
-     * y << 8); propagation subtracts max(1, opacity)
-     */
+    /** Light opacity (0..255) at {@code x | z << 4 | y << 8}; propagation subtracts max(1, opacity) */
     int getOpacity(Object section, int localIndex, int worldX, int worldY, int worldZ);
 
     /** Emitted block light (0..15) of the block at {@code localIndex} of a non-null section. */
