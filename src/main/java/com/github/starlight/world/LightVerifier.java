@@ -14,6 +14,7 @@ import net.minecraft.block.state.IBlockState;
 import net.minecraft.init.Blocks;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.ChunkPos;
+import net.minecraft.world.World;
 import net.minecraft.world.WorldServer;
 import net.minecraft.world.chunk.Chunk;
 import net.minecraft.world.gen.ChunkProviderServer;
@@ -44,8 +45,15 @@ public final class LightVerifier {
     // -Dstarlight.verifyBurst=N: once, 400 ticks in, verify N random lit chunks (5x5 lit) at once
     public static final int BURST = Integer.getInteger("starlight.verifyBurst", 0);
 
+    // -Dstarlight.stopAfterTicks=N: clean shutdown (saves everything) N ticks in, for save/reload tests
+    public static final int STOP_AFTER = Integer.getInteger("starlight.stopAfterTicks", 0);
+
     public static void tick(final WorldServer world, final WorldLight light) {
         ++ticks;
+        if (STOP_AFTER > 0 && ticks == STOP_AFTER && world.provider.getDimension() == 0) {
+            Starlight.LOGGER.info("[Starlight] stopAfterTicks reached: stopping the server");
+            world.getMinecraftServer().initiateShutdown();
+        }
         if (BURST > 0 && ticks == 400 && world.provider.getDimension() == 0) {
             light.propagateChanges();
             final List<Chunk> c = candidates(world, light);
@@ -134,7 +142,7 @@ public final class LightVerifier {
         return candidates;
     }
 
-    private static boolean verify(final WorldServer world, final WorldLight light, final Chunk center) {
+    static boolean verify(final World world, final WorldLight light, final Chunk center) {
         final long start = System.nanoTime();
         final int x0 = (center.x - 2) << 4, z0 = (center.z - 2) << 4;
         final byte[] opacity = new byte[SIZE * SIZE * HEIGHT];

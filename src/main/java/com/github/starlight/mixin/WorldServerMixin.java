@@ -32,7 +32,7 @@ public abstract class WorldServerMixin {
         if (Boolean.getBoolean("starlight.memStats") && ((WorldServer)(Object)this).getTotalWorldTime() % 400 == 0 && ((WorldServer)(Object)this).provider.getDimension() == 0) {
             Starlight.LOGGER.info("[Starlight mem] {}", light.memStats());
         }
-        if (LightVerifier.ENABLED || LightVerifier.STALE_EDGE_TEST || LightVerifier.BURST > 0) {
+        if (LightVerifier.ENABLED || LightVerifier.STALE_EDGE_TEST || LightVerifier.BURST > 0 || LightVerifier.STOP_AFTER > 0) {
             LightVerifier.tick((WorldServer)(Object)this, light);
         }
     }

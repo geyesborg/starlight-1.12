@@ -28,10 +28,14 @@ public final class ClientLightVerifier {
 
     public static void frame(final Minecraft mc, final WorldLight clientLight) {
         final long now = System.nanoTime();
-        if (now < nextCheck || mc.world == null || mc.getIntegratedServer() == null) {
+        if (now < nextCheck || mc.world == null || mc.player == null) {
             return;
         }
         nextCheck = now + 10_000_000_000L;
+        if (mc.getIntegratedServer() == null) {
+            verifyMultiplayer(mc, clientLight);
+            return;
+        }
         final WorldServer serverWorld = mc.getIntegratedServer().getWorld(mc.world.provider.getDimension());
         final WorldLight serverLight = serverWorld == null ? null : ((StarlightWorld)serverWorld).starlight$getLight();
         if (serverLight == null || serverLight.hasPendingChanges() || clientLight.hasPendingChanges()) {
@@ -87,6 +91,33 @@ public final class ClientLightVerifier {
         }
         Starlight.LOGGER.info("[Starlight verify client] chunk {},{}: {} light differences vs server, {} vanilla array differences ({} of {} clean){}",
                 client.x, client.z, lightDiff, arrayDiff, clean, checked, sample);
+    }
+
+    // Multiplayer (no server to compare with): a client chunk near the player whose 5x5 neighbourhood
+    // is lit, against exact light computed from the client's own blocks
+    private static void verifyMultiplayer(final Minecraft mc, final WorldLight clientLight) {
+        if (clientLight.hasPendingChanges()) {
+            return;
+        }
+        final int px = mc.player.chunkCoordX, pz = mc.player.chunkCoordZ, r = mc.gameSettings.renderDistanceChunks;
+        final List<Chunk> candidates = new ArrayList<>();
+        for (int cx = px - r; cx <= px + r; ++cx) {
+            outer:
+            for (int cz = pz - r; cz <= pz + r; ++cz) {
+                for (int dx = -2; dx <= 2; ++dx) {
+                    for (int dz = -2; dz <= 2; ++dz) {
+                        final LightChunk n = clientLight.getChunkForLighting(cx + dx, cz + dz);
+                        if (n == null || !n.starlight$isLightReady()) {
+                            continue outer;
+                        }
+                    }
+                }
+                candidates.add((Chunk)clientLight.getChunkForLighting(cx, cz));
+            }
+        }
+        if (!candidates.isEmpty()) {
+            LightVerifier.verify(mc.world, clientLight, candidates.get(mc.world.rand.nextInt(candidates.size())));
+        }
     }
 
     // A section without sky data mirrors zeros into its vanilla array while reads extrude from above
